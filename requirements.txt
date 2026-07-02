@@ -1,0 +1,24 @@
+# RentA-Fleet PRO — Backend dependencies
+# Pinned for reproducible builds. Update deliberately.
+
+# --- Core framework ---
+Django==6.0.6
+djangorestframework==3.17.1
+django-cors-headers==4.9.0
+
+# --- PostgreSQL (OLTP / relational store) ---
+# psycopg 3 is the modern, Django-native driver. The [binary] extra ships
+# a precompiled libpq so no system-level Postgres dev headers are required.
+psycopg[binary]==3.3.4
+
+# --- ClickHouse (OLAP / time-series telemetry store) ---
+clickhouse-connect==1.4.0
+
+# --- Configuration ---
+python-dotenv==1.2.2
+
+# --- AI (Fleet Consultant; optional, falls back if key absent) ---
+openai==2.44.0
+
+# --- Development / seeding ---
+Faker==37.12.0
