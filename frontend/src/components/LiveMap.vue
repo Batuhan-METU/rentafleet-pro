@@ -146,36 +146,33 @@ const lastUpdateText = computed(() =>
 <template>
   <div class="flex h-[calc(100vh-9rem)] flex-col gap-4">
     <!-- Üst bilgi şeridi -->
-    <div class="flex flex-wrap items-center gap-3">
-      <div class="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 shadow-sm">
-        <span class="relative flex h-2.5 w-2.5">
-          <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"></span>
-          <span class="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500"></span>
-        </span>
-        <span class="text-sm font-semibold text-slate-700">Canlı</span>
+    <div class="flex flex-wrap items-center gap-2">
+      <div class="rf-capsule !py-2 flex items-center gap-2">
+        <span class="rf-live-dot" />
+        <span class="text-sm font-bold text-slate-800">Canlı</span>
       </div>
 
-      <div class="rounded-xl border border-slate-200 bg-white px-4 py-2.5 shadow-sm">
-        <span class="text-sm text-slate-500">Takip edilen:</span>
-        <span class="ml-1 text-sm font-bold text-slate-900">{{ trackable.length }}</span>
+      <div class="rf-capsule !py-2">
+        <span class="text-sm text-slate-500/80">Takip:</span>
+        <span class="ml-1 text-sm font-black text-slate-900">{{ trackable.length }}</span>
       </div>
 
-      <div class="rounded-xl border border-slate-200 bg-white px-4 py-2.5 shadow-sm">
-        <span class="text-sm text-slate-500">Hareket halinde:</span>
-        <span class="ml-1 text-sm font-bold text-emerald-600">{{ movingCount }}</span>
+      <div class="rf-capsule !py-2">
+        <span class="text-sm text-slate-500/80">Hareket:</span>
+        <span class="ml-1 text-sm font-black text-emerald-600">{{ movingCount }}</span>
       </div>
 
-      <div class="rounded-xl border border-slate-200 bg-white px-4 py-2.5 shadow-sm">
-        <span class="text-sm text-slate-500">Kirada:</span>
-        <span class="ml-1 text-sm font-bold text-blue-600">{{ rentedCount }}</span>
+      <div class="rf-capsule !py-2">
+        <span class="text-sm text-slate-500/80">Kirada:</span>
+        <span class="ml-1 text-sm font-black text-blue-600">{{ rentedCount }}</span>
       </div>
 
       <div
-        class="rounded-xl border px-4 py-2.5 shadow-sm"
-        :class="criticalCount ? 'border-red-200 bg-red-50' : 'border-slate-200 bg-white'"
+        class="rf-capsule !py-2"
+        :class="criticalCount ? 'ring-1 ring-red-300/40' : ''"
       >
-        <span class="text-sm text-slate-500">Kritik anomali:</span>
-        <span class="ml-1 text-sm font-bold" :class="criticalCount ? 'text-red-700' : 'text-slate-900'">{{ criticalCount }}</span>
+        <span class="text-sm text-slate-500/80">Kritik:</span>
+        <span class="ml-1 text-sm font-black" :class="criticalCount ? 'text-red-700' : 'text-slate-900'">{{ criticalCount }}</span>
       </div>
 
       <div class="ml-auto flex items-center gap-4">
@@ -190,7 +187,7 @@ const lastUpdateText = computed(() =>
     </div>
 
     <!-- Harita -->
-    <div class="relative flex-1 overflow-hidden rounded-2xl border border-slate-200 shadow-sm">
+    <div class="rf-glass-strong relative flex-1 overflow-hidden rounded-3xl ring-1 ring-white/40">
       <div ref="mapEl" class="h-full w-full"></div>
 
       <div

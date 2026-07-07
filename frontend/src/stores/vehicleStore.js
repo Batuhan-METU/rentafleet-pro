@@ -7,6 +7,19 @@ import apiClient from '../services/api.js'
 let liveTimer = null
 const LIVE_POLL_MS = 5000
 
+function todayLocalDate() {
+  const d = new Date()
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+function vehicleMarketCacheKey(vehicleId, baslangic = null, bitis = null) {
+  if (!baslangic && !bitis) return `rf_market_v1_${todayLocalDate()}_${vehicleId}`
+  return `rf_market_v1_${baslangic}_${bitis}_${vehicleId}`
+}
+
 // Backend'in İngilizce durum kodlarının Türkçe karşılıkları + Tailwind
 // renk sınıfları. Dönüşüm mantığının TEK kaynağı burasıdır.
 const STATUS_MAP = {
@@ -51,15 +64,13 @@ export const useVehicleStore = defineStore('vehicle', {
     detailError: false,
 
     // Kart rozetleri kaldırıldı — skor artık sürücüye aittir (driverStore).
-    // Kart için araç kimliği -> önerilen fiyat verisi önbelleği.
-    pricingById: {},
-    // Piyasa rakip fiyatları ve AI önerisi (PricingManager).
+    // Piyasa rakip fiyatları (PricingManager).
     competitorPricesById: {},
-    marketPricingById: {},
     marketListingsById: {},
     marketMetaById: {},
     marketStatisticsById: {},
     marketSyncing: false,
+    competitorLoadingId: null,
 
     // Canlı takip: tüm araçların en güncel konum/hız/durum verisi.
     liveVehicles: [],
@@ -99,6 +110,11 @@ export const useVehicleStore = defineStore('vehicle', {
   },
 
   actions: {
+    marketSlotKey(id, baslangic = null, bitis = null) {
+      if (!baslangic && !bitis) return String(id)
+      return `${id}|${baslangic}|${bitis}`
+    },
+
     async fetchVehicles() {
       this.loading = true
       this.error = false
@@ -140,81 +156,94 @@ export const useVehicleStore = defineStore('vehicle', {
       return this.currentVehicleScore
     },
 
-    // Kart için önerilen fiyatı (önbellekli) yükler; hata olursa sessiz kalır.
-    async fetchVehiclePricing(id, force = false) {
-      if (!force && this.pricingById[id] !== undefined && this.marketPricingById[id]) {
-        return this.marketPricingById[id]
+    async fetchCompetitorPrices(id, { force = false, baslangic = null, bitis = null } = {}) {
+      const slot = this.marketSlotKey(id, baslangic, bitis)
+      const params = {}
+      if (baslangic && bitis) {
+        params.baslangic_tarihi = baslangic
+        params.bitis_tarihi = bitis
       }
+      const cacheKey = vehicleMarketCacheKey(id, baslangic, bitis)
+
+      if (!force) {
+        try {
+          const raw = localStorage.getItem(cacheKey)
+          if (raw) {
+            const data = JSON.parse(raw)
+            this._applyVehicleCompetitorPayload(slot, data)
+            if (this.marketListingsById[slot]?.length) {
+              return this.competitorPricesById[slot]
+            }
+          }
+        } catch {
+          // önbellek okunamadı
+        }
+      }
+
+      if (!force && this.marketListingsById[slot]?.length) {
+        return this.competitorPricesById[slot]
+      }
+
+      this.competitorLoadingId = slot
       try {
-        const { data } = await apiClient.get(`vehicles/${id}/suggested-price/`)
-        this.pricingById[id] = { price: data.onerilen_fiyat, reason: data.gerekce }
-        this.marketPricingById[id] = {
-          onerilen_fiyat: data.onerilen_fiyat,
-          ai_tavsiyesi: data.ai_tavsiyesi,
-          gerekce: data.gerekce,
-          piyasa_ortalamasi: data.piyasa_ortalamasi,
-          rakip_sayisi: data.rakip_sayisi ?? 0,
-          rakipler: data.rakipler ?? [],
-          yield_fiyat: data.yield_fiyat,
-          yield_gerekce: data.yield_gerekce,
-          taban_fiyat: data.taban_fiyat,
+        const { data } = await apiClient.get(`vehicles/${id}/competitor-prices/`, {
+          params,
+          timeout: baslangic && bitis ? 120000 : 15000,
+        })
+        this._applyVehicleCompetitorPayload(slot, data)
+        try {
+          localStorage.setItem(cacheKey, JSON.stringify(data))
+        } catch {
+          // localStorage dolu
         }
       } catch {
-        // Fiyat rozeti gösterilmez; kart yine de çalışır.
+        this.competitorPricesById[slot] = []
+        this.marketListingsById[slot] = []
+        this.marketStatisticsById[slot] = null
+      } finally {
+        if (this.competitorLoadingId === slot) this.competitorLoadingId = null
       }
-      return this.marketPricingById[id]
+      return this.competitorPricesById[slot]
     },
 
-    async fetchCompetitorPrices(id) {
+    _applyVehicleCompetitorPayload(slot, data) {
+      this.competitorPricesById[slot] = data.rakipler ?? []
+      this.marketListingsById[slot] = this._mapMatchedVehicles(data)
+      this.marketMetaById[slot] = {
+        matchedSegment: data.matchedSegment,
+        vehicleCount: data.vehicleCount,
+        arama: data.arama,
+      }
+      this.marketStatisticsById[slot] = data.statistics ?? null
+    },
+
+    async fetchAllCompetitorPrices({ force = false, baslangic = null, bitis = null } = {}) {
+      if (!force && Object.keys(this.marketListingsById).length > 0) {
+        return Object.keys(this.marketListingsById).length
+      }
+      this.marketSyncing = true
       try {
-        const { data } = await apiClient.get(`vehicles/${id}/competitor-prices/`)
-        this.competitorPricesById[id] = data.rakipler ?? []
-        this.marketListingsById[id] = this._mapMatchedVehicles(data)
-        this.marketMetaById[id] = {
-          matchedSegment: data.matchedSegment,
-          vehicleCount: data.vehicleCount,
-          arama: data.arama,
+        const params = {}
+        if (baslangic && bitis) {
+          params.baslangic_tarihi = baslangic
+          params.bitis_tarihi = bitis
         }
-        this.marketStatisticsById[id] = data.statistics ?? null
-      } catch {
-        this.competitorPricesById[id] = []
-        this.marketListingsById[id] = []
-        this.marketStatisticsById[id] = null
-      }
-      return this.competitorPricesById[id]
-    },
-
-    async fetchAllCompetitorPrices() {
-      try {
-        const { data } = await apiClient.get('fleet/competitor-prices/', { timeout: 60000 })
+        const { data } = await apiClient.get('fleet/competitor-prices/', {
+          params,
+          timeout: baslangic && bitis ? 120000 : 120000,
+        })
         const araclar = data.araclar ?? {}
         this._applyCompetitorPayloadMap(araclar, data.arama)
         return Object.keys(araclar).length
       } catch {
-        return 0
+        return Object.keys(this.marketListingsById).length
+      } finally {
+        this.marketSyncing = false
       }
     },
 
     async syncFleetMarketPrices() {
-      if (this.marketSyncing) return
-      this.marketSyncing = true
-      this.competitorPricesById = {}
-      this.marketListingsById = {}
-      this.marketMetaById = {}
-      this.marketStatisticsById = {}
-      try {
-        const { data } = await apiClient.post('fleet/market-prices/sync/', {}, { timeout: 180000 })
-        const araclar = data.araclar ?? {}
-        if (Object.keys(araclar).length) {
-          this._applyCompetitorPayloadMap(araclar, data.arama)
-        } else {
-          await this.fetchAllCompetitorPrices()
-        }
-      } catch {
-        await this.fetchAllCompetitorPrices()
-      } finally {
-        this.marketSyncing = false
-      }
+      return this.fetchAllCompetitorPrices({ force: true })
     },
 
     _applyCompetitorPayloadMap(araclar, aramaFallback = null) {

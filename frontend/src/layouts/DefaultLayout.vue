@@ -1,10 +1,13 @@
 <script setup>
-// Uygulama kabuğu (app-shell): sol kenar çubuğu + üst bar + içerik alanı.
-import { ref } from 'vue'
+import { computed, onMounted, onBeforeUnmount } from 'vue'
+import { storeToRefs } from 'pinia'
 import { useAuthStore } from '../stores/authStore.js'
+import { useUiStore } from '../stores/uiStore.js'
 import AppSidebar from '../components/AppSidebar.vue'
 
 const auth = useAuthStore()
+const ui = useUiStore()
+const { activeView } = storeToRefs(ui)
 
 const PAGE_META = {
   overview: { title: 'Genel Bakış', subtitle: 'Filonuzu tek ekrandan yönetin' },
@@ -12,14 +15,18 @@ const PAGE_META = {
   drivers: { title: 'Sürücüler', subtitle: 'Müşteri sürücü profilleri, skorlar ve kiralama geçmişi' },
   live: { title: 'Canlı Takip', subtitle: 'Araçlarınızı harita üzerinde gerçek zamanlı izleyin' },
   maintenance: { title: 'Bakım Merkezi', subtitle: 'Öngörücü bakım uyarıları ve araç yıpranma durumu' },
-  pricing: { title: 'Fiyatlandırma', subtitle: 'Dinamik yield fiyatlandırma ve talep analizi' },
+  pricing: { title: 'Fiyatlandırma', subtitle: 'Piyasa fiyatları + maliyet tabanlı fiyat önerisi' },
+  reservations: { title: 'Rezervasyonlar', subtitle: 'Araç–sürücü atamaları ve kiralama kayıtları' },
 }
 
-// Operasyon personeli genel bakışa erişemez; varsayılan sekme araçlar.
-const activeView = ref(auth.isFleetManager ? 'overview' : 'vehicles')
+const pageMeta = computed(() => PAGE_META[activeView.value] ?? PAGE_META.overview)
 
 function navigate(view) {
-  activeView.value = view
+  ui.navigate(view, { isFleetManager: auth.isFleetManager })
+}
+
+function onHashChange() {
+  ui.onHashChange(auth.isFleetManager)
 }
 
 const emit = defineEmits(['logout'])
@@ -27,17 +34,26 @@ const emit = defineEmits(['logout'])
 function logout() {
   emit('logout')
 }
+
+onMounted(() => {
+  ui.initNavigation(auth.isFleetManager)
+  window.addEventListener('hashchange', onHashChange)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('hashchange', onHashChange)
+})
 </script>
 
 <template>
-  <div class="flex h-screen overflow-hidden">
+  <div class="rf-ambient flex h-screen overflow-hidden">
     <AppSidebar :active-view="activeView" @navigate="navigate" @logout="logout" />
 
-    <div class="flex flex-1 flex-col overflow-hidden">
-      <header class="flex items-center justify-between gap-4 border-b border-slate-200 bg-white px-6 py-4">
+    <div class="flex min-w-0 flex-1 flex-col overflow-hidden">
+      <header class="rf-glass-strong rf-header-slice flex shrink-0 items-center justify-between gap-4 border-b border-white/30 px-6 py-5">
         <div>
-          <h1 class="text-xl font-bold text-slate-900">{{ PAGE_META[activeView]?.title }}</h1>
-          <p class="text-sm text-slate-500">{{ PAGE_META[activeView]?.subtitle }}</p>
+          <h1 class="rf-section-title">{{ pageMeta.title }}</h1>
+          <p class="rf-section-sub mt-0.5">{{ pageMeta.subtitle }}</p>
         </div>
         <div class="flex items-center gap-3">
           <slot name="actions" :active-view="activeView" :navigate="navigate" />

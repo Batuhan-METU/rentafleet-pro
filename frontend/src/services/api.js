@@ -1,31 +1,37 @@
-// Merkezi Axios örneği — tüm v1 API istekleri buradan geçer.
-// Token varsa Authorization başlığı otomatik eklenir; 401'de oturum temizlenir.
 import axios from 'axios'
+import { getTenantSlug } from '../utils/tenant.js'
 
 const apiClient = axios.create({
-  baseURL: 'http://127.0.0.1:8000/api/v1/',
-  timeout: 10000,
-  headers: {
-    'Content-Type': 'application/json',
-    Accept: 'application/json',
-  },
+  // Dev: Vite proxy (/api → Django). Prod: doğrudan backend URL'i ayarlanır.
+  baseURL: '/api/v1/',
+  timeout: 15000,
+  headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
 })
 
 apiClient.interceptors.request.use((config) => {
   const token = localStorage.getItem('rf_token')
-  if (token) {
-    config.headers.Authorization = `Token ${token}`
+  if (token) config.headers.Authorization = `Token ${token}`
+
+  const slug = getTenantSlug()
+  if (slug) {
+    config.params = { ...config.params, tenant: slug }
   }
   return config
 })
 
+let onUnauthorized = null
+
+/** Pinia auth store bootstrap sonrası bağlanır — sayfa reload yok. */
+export function setUnauthorizedHandler(fn) {
+  onUnauthorized = fn
+}
+
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401 && !error.config?.url?.includes('auth/login')) {
-      localStorage.removeItem('rf_token')
-      localStorage.removeItem('rf_user')
-      window.location.reload()
+    const isLogin = error.config?.url?.includes('auth/login')
+    if (error.response?.status === 401 && !isLogin && onUnauthorized) {
+      onUnauthorized()
     }
     return Promise.reject(error)
   },

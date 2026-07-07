@@ -1,108 +1,330 @@
 <script setup>
-// Otomatik piyasa fiyat karşılaştırması + AI akıllı fiyat (Filo Müdürü).
-import { computed, onMounted, ref, watch } from 'vue'
+// Fiyatlandırma: Enuygun piyasa verisi + maliyet tabanlı fiyat önerisi yan yana.
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { storeToRefs } from 'pinia'
 import { useVehicleStore } from '../stores/vehicleStore.js'
+import { useFinanceStore } from '../stores/financeStore.js'
+import { useRentalWorkflowStore } from '../stores/rentalWorkflowStore.js'
+import { useDriverStore } from '../stores/driverStore.js'
+import { useUiStore } from '../stores/uiStore.js'
+import { useAuthStore } from '../stores/authStore.js'
+import PricingCostPanel from './finance/PricingCostPanel.vue'
+import VehicleFormModal from './VehicleFormModal.vue'
+import RentalWorkflowProgress from './RentalWorkflowProgress.vue'
 
 const store = useVehicleStore()
+const finance = useFinanceStore()
+const workflow = useRentalWorkflowStore()
+const { readyForDriverPick } = storeToRefs(workflow)
+const driverStore = useDriverStore()
+const ui = useUiStore()
+const auth = useAuthStore()
 
 const selectedVehicleId = ref(null)
+const dateMode = ref('default')
+const customPickup = ref('')
+const customDropoff = ref('')
+const dateError = ref('')
+
+const showEditModal = ref(false)
+const editProfile = ref(null)
 
 const priceFormatter = new Intl.NumberFormat('tr-TR', {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
 })
 const kmFormatter = new Intl.NumberFormat('tr-TR')
+const displayDateFormatter = new Intl.DateTimeFormat('tr-TR', {
+  day: 'numeric',
+  month: 'long',
+  year: 'numeric',
+})
+
+function addDays(base, days) {
+  const d = new Date(base)
+  d.setDate(d.getDate() + days)
+  return d.toISOString().slice(0, 10)
+}
+
+const minPickupDate = addDays(new Date(), 1)
+
+function initCustomDates() {
+  if (!customPickup.value) customPickup.value = addDays(new Date(), 30)
+  if (!customDropoff.value) customDropoff.value = addDays(new Date(), 33)
+}
 
 const vehicles = computed(() => store.vehicles)
 const loading = computed(() => store.loading)
-const marketSyncing = computed(() => store.marketSyncing)
+
+const dateParams = computed(() => {
+  if (dateMode.value === 'default') return { baslangic: null, bitis: null }
+  return { baslangic: customPickup.value, bitis: customDropoff.value }
+})
+
+const marketSlot = computed(() => {
+  const id = selectedVehicleId.value
+  if (!id) return null
+  return store.marketSlotKey(id, dateParams.value.baslangic, dateParams.value.bitis)
+})
+
+const competitorLoading = computed(
+  () => marketSlot.value && store.competitorLoadingId === marketSlot.value,
+)
 
 const selectedVehicle = computed(() =>
   vehicles.value.find((v) => v.id === selectedVehicleId.value) ?? null,
 )
 
-const marketAdvice = computed(() => {
-  const id = selectedVehicleId.value
-  if (!id) return null
-  return store.marketPricingById[id] ?? null
-})
-
 const marketListings = computed(() => {
-  const id = selectedVehicleId.value
-  if (!id) return []
-  return store.marketListingsById[id] ?? []
+  if (!marketSlot.value) return []
+  return store.marketListingsById[marketSlot.value] ?? []
 })
 
 const marketMeta = computed(() => {
-  const id = selectedVehicleId.value
-  if (!id) return null
-  return store.marketMetaById[id] ?? null
+  if (!marketSlot.value) return null
+  return store.marketMetaById[marketSlot.value] ?? null
 })
 
 const marketStatistics = computed(() => {
-  const id = selectedVehicleId.value
-  if (!id) return null
-  return store.marketStatisticsById[id] ?? null
+  if (!marketSlot.value) return null
+  return store.marketStatisticsById[marketSlot.value] ?? null
+})
+
+const marketAverage = computed(() => marketStatistics.value?.averagePrice ?? null)
+
+const costAnalysis = computed(() =>
+  selectedVehicleId.value ? finance.quoteFor(selectedVehicleId.value) : null,
+)
+
+const rentalDays = computed(() => {
+  if (costAnalysis.value?.kiralanan_gun) return costAnalysis.value.kiralanan_gun
+  const arama = marketMeta.value?.arama
+  if (arama?.alis_tarihi && arama?.donus_tarihi) {
+    const ms = new Date(arama.donus_tarihi) - new Date(arama.alis_tarihi)
+    return Math.max(Math.round(ms / 86400000), 1)
+  }
+  if (dateMode.value === 'custom' && customPickup.value && customDropoff.value) {
+    const ms = new Date(customDropoff.value) - new Date(customPickup.value)
+    return Math.max(Math.round(ms / 86400000), 1)
+  }
+  return 1
+})
+
+const isFutureWindow = computed(() => marketMeta.value?.arama?.varsayilan_pencere === false)
+
+const windowLabel = computed(() => {
+  const arama = marketMeta.value?.arama
+  if (!arama) return null
+  const pickup = arama.hedef_baslangic || arama.alis_tarihi
+  const dropoff = arama.hedef_bitis || arama.donus_tarihi
+  if (!pickup || !dropoff) return null
+  try {
+    const p = displayDateFormatter.format(new Date(`${pickup}T12:00:00`))
+    const d = displayDateFormatter.format(new Date(`${dropoff}T12:00:00`))
+    return `${p} → ${d}`
+  } catch {
+    return `${pickup} → ${dropoff}`
+  }
 })
 
 function formatPrice(value) {
   return value != null ? `${priceFormatter.format(value)} TL` : '—'
 }
 
-async function loadVehicleData(vehicleId) {
-  if (!vehicleId) return
-  await Promise.all([
-    store.fetchVehiclePricing(vehicleId, true),
-    store.fetchCompetitorPrices(vehicleId),
-  ])
+function validateCustomDates() {
+  dateError.value = ''
+  if (dateMode.value !== 'custom') return true
+  if (!customPickup.value || !customDropoff.value) {
+    dateError.value = 'Alış ve dönüş tarihlerini seçin.'
+    return false
+  }
+  if (customDropoff.value <= customPickup.value) {
+    dateError.value = 'Dönüş tarihi alış tarihinden sonra olmalıdır.'
+    return false
+  }
+  if (customPickup.value < minPickupDate) {
+    dateError.value = 'Alış tarihi en erken yarın olabilir.'
+    return false
+  }
+  return true
+}
+
+function loadVehicleData(vehicleId, { force = false } = {}) {
+  if (!vehicleId || !validateCustomDates()) return
+  const opts = dateParams.value
+  void store.fetchCompetitorPrices(vehicleId, { force, ...opts })
+  void finance.fetchRentalQuote(vehicleId, {
+    force,
+    baslangic: opts.baslangic,
+    bitis: opts.bitis,
+  })
+}
+
+function applyDateAnalysis() {
+  if (!selectedVehicleId.value) return
+  loadVehicleData(selectedVehicleId.value, { force: true })
+}
+
+function setDateMode(mode) {
+  dateMode.value = mode
+  if (mode === 'custom') initCustomDates()
+  dateError.value = ''
+  if (selectedVehicleId.value) {
+    loadVehicleData(selectedVehicleId.value, { force: mode === 'custom' })
+  }
+}
+
+async function openEditModal() {
+  if (!selectedVehicle.value) return
+  editProfile.value = await finance.fetchProfile(selectedVehicleId.value)
+  showEditModal.value = true
+}
+
+async function onVehicleSaved() {
+  showEditModal.value = false
+  await store.fetchVehicles()
+  if (selectedVehicleId.value) {
+    await finance.fetchRentalQuote(selectedVehicleId.value, {
+      force: true,
+      ...dateParams.value,
+    })
+  }
+}
+
+watch(
+  vehicles,
+  (list) => {
+    if (workflow.active && workflow.vehicleId) {
+      selectedVehicleId.value = workflow.vehicleId
+      return
+    }
+    if (list.length && !selectedVehicleId.value) {
+      selectedVehicleId.value = list[0].id
+    }
+  },
+  { immediate: true },
+)
+
+async function onOfferAccepted(price) {
+  if (!selectedVehicle.value) return
+  const pickup = dateMode.value === 'custom' ? customPickup.value : addDays(new Date(), 1)
+  const dropoff = dateMode.value === 'custom' ? customDropoff.value : addDays(new Date(), 3)
+  workflow.acceptPricingOffer({
+    vehicle: selectedVehicle.value,
+    agreedPrice: price,
+    pickupDate: pickup,
+    dropoffDate: dropoff,
+  })
+  ui.navigate('drivers', { isFleetManager: auth.isFleetManager })
+  await nextTick()
+  void driverStore.fetchDrivers()
 }
 
 watch(selectedVehicleId, (id) => {
-  if (id && !store.marketSyncing) loadVehicleData(id)
+  if (id) {
+    loadVehicleData(id)
+    if (workflow.active) {
+      const v = vehicles.value.find((x) => x.id === id)
+      if (v) workflow.selectVehicle(v)
+    }
+  }
 })
 
-onMounted(async () => {
-  if (!store.vehicles.length) await store.fetchVehicles()
-  await store.syncFleetMarketPrices()
-  if (store.vehicles.length && !selectedVehicleId.value) {
-    selectedVehicleId.value = store.vehicles[0].id
-  }
-  if (selectedVehicleId.value) {
-    await loadVehicleData(selectedVehicleId.value)
-  }
+onMounted(() => {
+  if (!store.vehicles.length) void store.fetchVehicles()
 })
 </script>
 
 <template>
   <div class="space-y-6">
-    <div class="rounded-xl border border-brand-100 bg-gradient-to-r from-brand-50 to-indigo-50 px-5 py-4">
-      <h3 class="text-sm font-bold text-slate-800">Akıllı Fiyatlandırma</h3>
-      <p class="mt-1 text-sm text-slate-600">
-        Araç seçin; sistem Enuygun API üzerinden aynı segmentteki tüm kiralama firmalarının
-        günlük fiyatlarını listeler ve AI önerisi üretir.
+    <RentalWorkflowProgress v-if="readyForDriverPick">
+      <p class="mt-2 text-sm text-slate-600">
+        Devam eden bir kiralama süreciniz var.
+        <button
+          type="button"
+          class="font-bold text-brand-600 underline"
+          @click="ui.navigate('drivers', { isFleetManager: auth.isFleetManager })"
+        >
+          Sürücü seçmeye git
+        </button>
+      </p>
+    </RentalWorkflowProgress>
+
+    <div class="rf-glass-strong rounded-3xl px-6 py-5">
+      <h3 class="text-lg font-black text-slate-900">Akıllı Fiyatlandırma</h3>
+      <p class="mt-1 text-sm text-slate-500/80">
+        Sol tarafta Enuygun piyasa fiyatları, sağ tarafta seçilen gün sayısı için maliyet tabanınız
+        ve müdür fiyatı. Tabanın altına inmeyin; piyasa ile dengeli fiyat belirleyin.
       </p>
     </div>
 
-    <div
-      v-if="marketSyncing"
-      class="flex items-center gap-3 rounded-xl border border-brand-100 bg-white px-5 py-4"
-    >
-      <div class="h-5 w-5 animate-spin rounded-full border-2 border-slate-200 border-t-brand-600"></div>
-      <p class="text-sm text-slate-600">Enuygun API üzerinden filo piyasa fiyatları güncelleniyor...</p>
-    </div>
-
-    <div v-if="loading && !vehicles.length" class="grid place-items-center rounded-2xl border border-slate-200 bg-white p-16">
+    <div v-if="loading && !vehicles.length" class="rf-glass grid place-items-center rounded-3xl p-16">
       <div class="h-10 w-10 animate-spin rounded-full border-4 border-slate-200 border-t-brand-600"></div>
       <p class="mt-3 text-sm text-slate-500">Araçlar yükleniyor...</p>
     </div>
 
     <template v-else>
-      <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <label class="text-xs font-semibold uppercase tracking-wide text-slate-400">Araç Seçin</label>
+      <!-- Tarih penceresi -->
+      <div class="rf-glass-strong rounded-3xl p-5">
+        <label class="text-xs font-bold uppercase tracking-widest text-slate-500/75">Piyasa Tarih Penceresi</label>
+        <div class="mt-3 flex flex-wrap gap-2">
+          <button
+            type="button"
+            class="rf-pill-filter"
+            :class="dateMode === 'default' ? 'rf-pill-filter--active' : 'rf-pill-filter--idle'"
+            @click="setDateMode('default')"
+          >
+            Varsayılan (yarın + ertesi gün)
+          </button>
+          <button
+            type="button"
+            class="rf-pill-filter"
+            :class="dateMode === 'custom' ? 'rf-pill-filter--active' : 'rf-pill-filter--idle'"
+            @click="setDateMode('custom')"
+          >
+            Gelecek Tarih Analizi
+          </button>
+        </div>
+
+        <div v-if="dateMode === 'custom'" class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div>
+            <label class="text-xs font-medium text-slate-500/80">Alış Tarihi</label>
+            <input
+              v-model="customPickup"
+              type="date"
+              :min="minPickupDate"
+              class="rf-input mt-1"
+            />
+          </div>
+          <div>
+            <label class="text-xs font-medium text-slate-500/80">Dönüş Tarihi</label>
+            <input
+              v-model="customDropoff"
+              type="date"
+              :min="customPickup || minPickupDate"
+              class="rf-input mt-1"
+            />
+          </div>
+          <div class="flex items-end">
+            <button
+              type="button"
+              class="rf-btn-primary w-full"
+              :disabled="competitorLoading"
+              @click="applyDateAnalysis"
+            >
+              {{ competitorLoading ? 'Analiz ediliyor…' : 'Bu Tarihler İçin Analiz Et' }}
+            </button>
+          </div>
+        </div>
+
+        <p v-if="dateError" class="mt-2 text-sm text-red-600">{{ dateError }}</p>
+      </div>
+
+      <div class="rf-glass-strong rounded-3xl p-5">
+        <label class="text-xs font-bold uppercase tracking-widest text-slate-500/75">Araç Seçin</label>
         <select
           v-model="selectedVehicleId"
-          class="mt-2 w-full max-w-xl rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-800 outline-none focus:border-brand-500 focus:bg-white focus:ring-2 focus:ring-brand-100"
-          :disabled="marketSyncing"
+          class="rf-input mt-2 max-w-xl"
         >
           <option v-for="v in vehicles" :key="v.id" :value="v.id">
             {{ v.plate_number }} — {{ v.brand }} {{ v.model }}
@@ -114,98 +336,97 @@ onMounted(async () => {
           <span v-if="selectedVehicle.sinif_etiketi">· {{ selectedVehicle.sinif_etiketi }}</span>
           · {{ kmFormatter.format(selectedVehicle.current_km) }} km
         </p>
-        <p v-if="marketMeta?.matchedSegment" class="mt-2 text-xs text-brand-700">
-          Segment: {{ marketMeta.matchedSegment }}
-          <span v-if="marketMeta.vehicleCount"> · {{ marketMeta.vehicleCount }} teklif</span>
-        </p>
-        <p v-if="marketMeta?.arama" class="mt-1 text-xs text-slate-400">
-          {{ marketMeta.arama.sehir }} · {{ marketMeta.arama.alis_tarihi }} → {{ marketMeta.arama.donus_tarihi }}
-        </p>
+        <div v-if="windowLabel" class="mt-3 flex flex-wrap items-center gap-2">
+          <span
+            class="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold"
+            :class="isFutureWindow
+              ? 'bg-amber-100 text-amber-800 ring-1 ring-amber-200'
+              : 'bg-emerald-100 text-emerald-800 ring-1 ring-emerald-200'"
+          >
+            {{ isFutureWindow ? 'Gelecek tarih' : 'Varsayılan pencere' }}
+          </span>
+          <span class="text-xs text-slate-500">{{ marketMeta?.arama?.sehir }} · {{ windowLabel }}</span>
+        </div>
       </div>
 
-      <div v-if="selectedVehicleId && !marketSyncing" class="grid gap-6 xl:grid-cols-2">
-        <div class="rounded-2xl border border-emerald-100 bg-white shadow-sm">
-          <div class="border-b border-emerald-100 bg-emerald-50/50 px-5 py-3">
-            <h4 class="text-sm font-bold text-emerald-900">Piyasa Karşılaştırması</h4>
-            <p class="text-xs text-emerald-700">Enuygun — segment uyumlu tüm firmalar</p>
+      <!-- Piyasa + Maliyet yan yana -->
+      <div v-if="selectedVehicleId" class="grid gap-6 xl:grid-cols-2">
+        <!-- Enuygun piyasa -->
+        <div class="rf-glass-strong overflow-hidden rounded-3xl">
+          <div class="border-b border-white/30 bg-white/20 px-5 py-4 backdrop-blur-sm">
+            <div class="flex items-center gap-2">
+              <span class="rf-live-dot" />
+              <h4 class="text-sm font-black text-slate-900">Enuygun — Piyasa Karşılaştırması</h4>
+            </div>
+            <p class="text-xs text-slate-500/80">Rakip firmaların günlük fiyatları</p>
           </div>
           <div
             v-if="marketStatistics"
-            class="grid grid-cols-3 gap-2 border-b border-emerald-100 bg-emerald-50/30 px-5 py-3 text-center text-xs"
+            class="grid grid-cols-3 gap-2 border-b border-white/20 bg-white/10 px-5 py-4 text-center text-xs backdrop-blur-sm"
           >
-            <div>
-              <p class="text-slate-500">Min</p>
-              <p class="font-bold text-emerald-900">{{ formatPrice(marketStatistics.minPrice) }}</p>
+            <div class="rf-glass rounded-2xl px-2 py-2">
+              <p class="text-slate-500/75">Min</p>
+              <p class="font-black text-emerald-800">{{ formatPrice(marketStatistics.minPrice) }}</p>
             </div>
-            <div>
-              <p class="text-slate-500">Ortalama</p>
-              <p class="font-bold text-emerald-900">{{ formatPrice(marketStatistics.averagePrice) }}</p>
+            <div class="rf-glass rounded-2xl px-2 py-2">
+              <p class="text-slate-500/75">Ortalama</p>
+              <p class="font-black text-emerald-800">{{ formatPrice(marketStatistics.averagePrice) }}</p>
             </div>
-            <div>
-              <p class="text-slate-500">Max</p>
-              <p class="font-bold text-emerald-900">{{ formatPrice(marketStatistics.maxPrice) }}</p>
+            <div class="rf-glass rounded-2xl px-2 py-2">
+              <p class="text-slate-500/75">Max</p>
+              <p class="font-black text-emerald-800">{{ formatPrice(marketStatistics.maxPrice) }}</p>
             </div>
           </div>
-          <div class="overflow-x-auto">
-            <table class="w-full text-left text-sm">
-              <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
-                <tr>
-                  <th class="px-5 py-3 font-semibold">Firma</th>
-                  <th class="px-5 py-3 font-semibold">Araç</th>
-                  <th class="px-5 py-3 font-semibold">SIPP</th>
-                  <th class="px-5 py-3 font-semibold text-right">Günlük Fiyat</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-slate-100">
-                <tr v-if="!marketListings.length">
-                  <td colspan="4" class="px-5 py-10 text-center text-slate-400">
-                    Piyasa verisi henüz yok. Senkron tamamlanınca burada görünecek.
-                  </td>
-                </tr>
-                <tr v-for="(row, idx) in marketListings" :key="`${row.kaynak}-${idx}`" class="hover:bg-slate-50/80">
-                  <td class="px-5 py-3 font-medium text-slate-800">{{ row.kaynak || row.provider }}</td>
-                  <td class="px-5 py-3 text-slate-600">{{ row.benzer_arac || `${row.brand} ${row.model}` }}</td>
-                  <td class="px-5 py-3 font-mono text-xs text-slate-500">{{ row.segment || '—' }}</td>
-                  <td class="px-5 py-3 text-right font-bold text-emerald-800">{{ formatPrice(row.gunluk_fiyat ?? row.dailyPrice) }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <div class="space-y-4">
-          <div class="rounded-2xl border-2 border-brand-200 bg-gradient-to-br from-white to-brand-50 p-6 shadow-sm">
-            <p class="text-xs font-bold uppercase tracking-widest text-brand-600">Önerilen Akıllı Fiyat</p>
-            <p class="mt-3 text-5xl font-black tracking-tight text-brand-700 sm:text-6xl">
-              {{ marketAdvice ? formatPrice(marketAdvice.onerilen_fiyat) : '—' }}
+          <div class="p-4">
+            <div v-if="competitorLoading && !marketListings.length" class="grid place-items-center py-12 text-slate-500">
+              <span class="inline-flex items-center gap-2 text-sm">
+                <span class="h-4 w-4 animate-spin rounded-full border-2 border-slate-200 border-t-brand-600" />
+                Piyasa verisi yükleniyor…
+              </span>
+            </div>
+            <p v-else-if="!marketListings.length" class="py-10 text-center text-sm text-slate-400">
+              Bu araç için piyasa verisi yok.
+              <code class="mt-1 block text-xs">python manage.py fetch_competitor_prices</code>
             </p>
-            <p v-if="marketAdvice?.piyasa_ortalamasi" class="mt-2 text-sm text-slate-600">
-              Piyasa ortalaması:
-              <span class="font-semibold text-slate-800">{{ formatPrice(marketAdvice.piyasa_ortalamasi) }}</span>
-              <span class="text-slate-400"> · {{ marketAdvice.rakip_sayisi }} kaynak</span>
-            </p>
-          </div>
-
-          <div class="rounded-2xl border border-indigo-100 bg-indigo-50/60 p-5">
-            <div class="flex items-start gap-3">
-              <div class="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-indigo-600 text-lg text-white">AI</div>
-              <div class="min-w-0 flex-1">
-                <p class="text-sm font-bold text-indigo-900">AI Tavsiyesi</p>
-                <p class="mt-2 text-sm leading-relaxed text-indigo-950">
-                  {{ marketAdvice?.ai_tavsiyesi ?? 'Araç seçildiğinde öneri yüklenecek.' }}
-                </p>
+            <div v-else class="grid gap-3 sm:grid-cols-2">
+              <div
+                v-for="(row, idx) in marketListings"
+                :key="`${row.kaynak}-${idx}`"
+                class="rf-glass rf-interactive rounded-2xl p-4"
+              >
+                <div class="flex items-start justify-between gap-2">
+                  <div>
+                    <p class="font-black text-slate-900">{{ row.kaynak || row.provider }}</p>
+                    <p class="mt-0.5 text-xs text-slate-500/80">{{ row.benzer_arac || `${row.brand} ${row.model}` }}</p>
+                  </div>
+                  <p class="shrink-0 text-lg font-black text-emerald-700">
+                    {{ formatPrice(row.gunluk_fiyat ?? row.dailyPrice) }}
+                  </p>
+                </div>
+                <p class="mt-2 text-[10px] font-bold uppercase tracking-wider text-slate-400">Günlük</p>
               </div>
             </div>
           </div>
-
-          <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <p class="text-xs font-bold uppercase tracking-wide text-slate-400">Gerekçe</p>
-            <p class="mt-2 text-sm leading-relaxed text-slate-700">
-              {{ marketAdvice?.gerekce ?? '—' }}
-            </p>
-          </div>
         </div>
+
+        <!-- Maliyet tabanlı fiyat -->
+        <PricingCostPanel
+          :quote="costAnalysis"
+          :loading="finance.quoteLoading"
+          :market-average="marketAverage"
+          :rental-days="rentalDays"
+          @edit-vehicle="openEditModal"
+          @offer-accepted="onOfferAccepted"
+        />
       </div>
     </template>
+
+    <VehicleFormModal
+      v-if="showEditModal && selectedVehicle"
+      :edit-vehicle="selectedVehicle"
+      :edit-profile="editProfile"
+      @close="showEditModal = false"
+      @saved="onVehicleSaved"
+    />
   </div>
 </template>

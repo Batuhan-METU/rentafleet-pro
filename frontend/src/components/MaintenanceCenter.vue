@@ -31,21 +31,18 @@ function statusPill(status) {
 <template>
   <div class="space-y-4">
     <!-- Özet şerit -->
-    <div class="flex flex-wrap items-center gap-3">
-      <div class="rounded-xl border border-slate-200 bg-white px-4 py-2.5 shadow-sm">
-        <span class="text-sm text-slate-500">Bakım bekleyen:</span>
-        <span class="ml-1 text-sm font-bold text-slate-900">{{ alerts.length }}</span>
+    <div class="flex flex-wrap items-center gap-2">
+      <div class="rf-capsule !py-2">
+        <span class="text-sm text-slate-500/80">Bakım bekleyen:</span>
+        <span class="ml-1 text-sm font-black text-slate-900">{{ alerts.length }}</span>
       </div>
-      <div
-        class="rounded-xl border px-4 py-2.5 shadow-sm"
-        :class="criticalCount ? 'border-red-200 bg-red-50' : 'border-slate-200 bg-white'"
-      >
-        <span class="text-sm text-slate-500">Acil (kırmızı):</span>
-        <span class="ml-1 text-sm font-bold" :class="criticalCount ? 'text-red-600' : 'text-slate-900'">{{ criticalCount }}</span>
+      <div class="rf-capsule !py-2" :class="criticalCount ? 'ring-1 ring-red-300/40' : ''">
+        <span class="text-sm text-slate-500/80">Acil:</span>
+        <span class="ml-1 text-sm font-black" :class="criticalCount ? 'text-red-600' : 'text-slate-900'">{{ criticalCount }}</span>
       </div>
       <button
         type="button"
-        class="ml-auto inline-flex items-center gap-2 rounded-lg bg-brand-600 px-3.5 py-2 text-sm font-semibold text-white transition hover:bg-brand-700 disabled:opacity-60"
+        class="rf-btn-primary ml-auto !py-2"
         :disabled="store.maintenanceLoading"
         @click="store.fetchMaintenanceAlerts()"
       >
@@ -57,14 +54,14 @@ function statusPill(status) {
     </div>
 
     <!-- Yükleniyor -->
-    <div v-if="loading" class="grid place-items-center rounded-2xl border border-slate-200 bg-white p-16">
+    <div v-if="loading" class="rf-glass grid place-items-center rounded-3xl p-16">
       <div class="h-10 w-10 animate-spin rounded-full border-4 border-slate-200 border-t-brand-600"></div>
       <p class="mt-3 text-sm text-slate-500">Bakım analizleri hesaplanıyor...</p>
     </div>
 
     <!-- Boş durum -->
-    <div v-else-if="!alerts.length" class="grid place-items-center rounded-2xl border border-dashed border-slate-300 bg-white p-16 text-center">
-      <div class="grid h-14 w-14 place-items-center rounded-full bg-emerald-100 text-2xl">✓</div>
+    <div v-else-if="!alerts.length" class="rf-glass grid place-items-center rounded-3xl p-16 text-center">
+      <span class="rf-icon-ring !h-14 !w-14 text-emerald-600">✓</span>
       <p class="mt-4 text-base font-semibold text-slate-700">Tüm araçlar bakım açısından iyi durumda</p>
       <p class="mt-1 text-sm text-slate-500">Şu anda servis gerektiren araç bulunmuyor.</p>
     </div>
@@ -74,7 +71,7 @@ function statusPill(status) {
       <div
         v-for="v in alerts"
         :key="v.id"
-        class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:shadow-md"
+        class="rf-glass rf-interactive rounded-3xl p-5"
       >
         <div class="flex flex-wrap items-start justify-between gap-3">
           <div>

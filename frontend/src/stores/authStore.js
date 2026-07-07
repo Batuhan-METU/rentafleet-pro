@@ -1,6 +1,7 @@
-// Kimlik doğrulama durumu — token + kullanıcı profili (Day 13 RBAC).
 import { defineStore } from 'pinia'
-import apiClient from '../services/api.js'
+import apiClient, { setUnauthorizedHandler } from '../services/api.js'
+import { useBrandingStore } from './brandingStore.js'
+import { inferTenantSlug, setTenantSlug } from '../utils/tenant.js'
 
 const TOKEN_KEY = 'rf_token'
 const USER_KEY = 'rf_user'
@@ -29,11 +30,22 @@ export const useAuthStore = defineStore('auth', {
   },
 
   actions: {
+    init() {
+      setUnauthorizedHandler(() => this.clearSession())
+    },
+
     _persist() {
       if (this.token) localStorage.setItem(TOKEN_KEY, this.token)
       else localStorage.removeItem(TOKEN_KEY)
       if (this.user) localStorage.setItem(USER_KEY, JSON.stringify(this.user))
       else localStorage.removeItem(USER_KEY)
+    },
+
+    _applyUser(user) {
+      this.user = user
+      this._persist()
+      if (user?.company_name) setTenantSlug(user.company_name)
+      useBrandingStore().applyFromUser(user)
     },
 
     async bootstrap() {
@@ -43,8 +55,7 @@ export const useAuthStore = defineStore('auth', {
       }
       try {
         const { data } = await apiClient.get('auth/me/')
-        this.user = data.user
-        this._persist()
+        this._applyUser(data.user)
       } catch {
         this.clearSession()
       } finally {
@@ -55,14 +66,19 @@ export const useAuthStore = defineStore('auth', {
     async login(username, password) {
       this.loading = true
       this.error = null
+      setTenantSlug(inferTenantSlug(username))
+
       try {
         const { data } = await apiClient.post('auth/login/', { username, password })
         this.token = data.token
-        this.user = data.user
-        this._persist()
+        this._applyUser(data.user)
         return true
       } catch (err) {
-        this.error = err.response?.data?.error || 'Giriş yapılamadı. Lütfen tekrar deneyin.'
+        if (!err.response) {
+          this.error = 'Sunucuya bağlanılamadı. `python manage.py runserver` çalışıyor mu?'
+        } else {
+          this.error = err.response.data?.error || 'Giriş yapılamadı.'
+        }
         return false
       } finally {
         this.loading = false
@@ -72,9 +88,7 @@ export const useAuthStore = defineStore('auth', {
     async logout() {
       try {
         await apiClient.post('auth/logout/')
-      } catch {
-        // Ağ hatası olsa bile yerel oturumu kapat.
-      }
+      } catch { /* ignore */ }
       this.clearSession()
     },
 

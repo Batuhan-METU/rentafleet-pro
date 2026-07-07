@@ -3,7 +3,7 @@
 Hybrid persistence:
   * PostgreSQL  -> transactional/relational data (users, companies, fleet).
   * ClickHouse  -> append-only, high-volume telemetry (queried via
-                   ``api/clickhouse_client.py``, NOT through the Django ORM).
+                   ``backend/infrastructure/clickhouse/client.py``, NOT through the Django ORM).
 
 Secrets and environment-specific values are loaded from a local ``.env``
 file (see ``.env.example``). Never commit a real ``.env``.
@@ -39,7 +39,10 @@ SECRET_KEY = os.getenv(
     "django-insecure-@1-prw@%%dojwcc5oz4p5+je13(y+7=a@6!gpm--q=gjof=o@y",
 )
 DEBUG = _env_bool("DJANGO_DEBUG", True)
-ALLOWED_HOSTS = _env_list("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1")
+ALLOWED_HOSTS = _env_list(
+    "DJANGO_ALLOWED_HOSTS",
+    "localhost,127.0.0.1,.localhost,.rentafleetpro.com",
+)
 
 
 # --- Applications ------------------------------------------------------
@@ -54,14 +57,20 @@ INSTALLED_APPS = [
     "rest_framework",
     "rest_framework.authtoken",
     "corsheaders",
-    # Local
-    "api",
+    # Local fleet app
+    "backend.apps.ApiConfig",
 ]
+
+# Migrations live under backend/migrations/ but keep the historical app label ``api``.
+MIGRATION_MODULES = {
+    "api": "backend.migrations",
+}
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "corsheaders.middleware.CorsMiddleware",  # must precede CommonMiddleware
     "django.contrib.sessions.middleware.SessionMiddleware",
+    "backend.middleware.multi_tenant.MultiTenantMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
@@ -90,18 +99,26 @@ WSGI_APPLICATION = "backend.wsgi.application"
 
 
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+    "default": {
+        "ENGINE": os.getenv("DB_ENGINE", "django.db.backends.sqlite3"),
+        "NAME": os.getenv("POSTGRES_DB", str(BASE_DIR / "db.sqlite3")),
+        "USER": os.getenv("POSTGRES_USER", ""),
+        "PASSWORD": os.getenv("POSTGRES_PASSWORD", ""),
+        "HOST": os.getenv("POSTGRES_HOST", ""),
+        "PORT": os.getenv("POSTGRES_PORT", ""),
+        "CONN_MAX_AGE": int(os.getenv("POSTGRES_CONN_MAX_AGE", "0")),
     }
 }
+
+if DATABASES["default"]["ENGINE"] == "django.db.backends.sqlite3":
+    DATABASES["default"]["NAME"] = BASE_DIR / "db.sqlite3"
 
 # Project-defined user model (roles: FLEET_MANAGER / OPERATIONS_STAFF).
 AUTH_USER_MODEL = "api.CustomUser"
 
 
 # --- ClickHouse (analytical / time-series store) -----------------------
-# Consumed by api/clickhouse_client.py. Kept as a plain dict so it stays
+# Consumed by backend/infrastructure/clickhouse/client.py. Kept as a plain dict so it stays
 # decoupled from the Django ORM / DATABASES routing.
 CLICKHOUSE = {
     "HOST": os.getenv("CLICKHOUSE_HOST", "127.0.0.1"),
@@ -141,11 +158,18 @@ REST_FRAMEWORK = {
 
 
 # --- CORS --------------------------------------------------------------
+from corsheaders.defaults import default_headers
+
 CORS_ALLOWED_ORIGINS = _env_list(
     "CORS_ALLOWED_ORIGINS",
-    # Vite dev server defaults to :5173; :3000 kept for alternative setups.
     "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000",
 )
+# Yeni kiracı subdomain'leri için yeniden deploy gerekmez.
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    r"^https://[\w-]+\.rentafleetpro\.com$",
+    r"^http://[\w-]+\.localhost:\d+$",
+]
+CORS_ALLOW_HEADERS = (*default_headers, "x-tenant-slug")
 
 
 # --- Password validation ----------------------------------------------

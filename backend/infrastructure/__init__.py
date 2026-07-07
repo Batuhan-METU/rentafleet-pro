@@ -1,0 +1,1 @@
+"""Infrastructure adapters (external services, databases, SQL)."""

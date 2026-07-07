@@ -1,8 +1,4 @@
 <script setup>
-// Filo grafikleri (Day 11) — ECharts (vue-echarts).
-//  * Yatay bar: en düşük sürüş skoruna sahip 5 araç (kritik filo).
-//  * Çizgi: haftalık AI yakıt tasarruf trendi.
-// Veri store.fleetAnalytics'ten gelir; tamamen Türkçe ve responsive.
 import { computed, onMounted } from 'vue'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
@@ -27,7 +23,6 @@ function scoreColor(score) {
 const hasLowest = computed(() => (a.value?.en_dusuk_skorlu_suruculer?.length ?? 0) > 0)
 const hasTrend = computed(() => (a.value?.haftalik_yakit_tasarrufu?.length ?? 0) > 0)
 
-// Grafik 1: en düşük skorlu 5 araç (yatay bar).
 const lowestScoreOption = computed(() => {
   const rows = a.value?.en_dusuk_skorlu_suruculer ?? []
   return {
@@ -40,32 +35,32 @@ const lowestScoreOption = computed(() => {
     xAxis: {
       type: 'value',
       max: 100,
-      splitLine: { lineStyle: { color: '#f1f5f9' } },
+      splitLine: { lineStyle: { color: 'rgba(148,163,184,0.2)' } },
       axisLabel: { color: '#94a3b8' },
     },
     yAxis: {
       type: 'category',
-      inverse: true, // en düşük skor en üstte
+      inverse: true,
       data: rows.map((r) => r.ad_soyad),
       axisLabel: { color: '#475569', fontWeight: 600 },
       axisTick: { show: false },
-      axisLine: { lineStyle: { color: '#e2e8f0' } },
+      axisLine: { lineStyle: { color: 'rgba(226,232,240,0.6)' } },
     },
     series: [
       {
         type: 'bar',
         data: rows.map((r) => ({ value: r.skor, itemStyle: { color: scoreColor(r.skor) } })),
         barWidth: '55%',
-        itemStyle: { borderRadius: [0, 6, 6, 0] },
+        itemStyle: { borderRadius: [0, 8, 8, 0] },
         label: { show: true, position: 'right', color: '#334155', fontWeight: 700 },
       },
     ],
   }
 })
 
-// Grafik 2: haftalık yakıt tasarruf trendi (yumuşak çizgi).
 const fuelTrendOption = computed(() => {
   const rows = a.value?.haftalik_yakit_tasarrufu ?? []
+  const primary = getComputedStyle(document.documentElement).getPropertyValue('--primary-color').trim() || '#3b82f6'
   return {
     grid: { left: 8, right: 20, top: 16, bottom: 8, containLabel: true },
     tooltip: {
@@ -77,12 +72,12 @@ const fuelTrendOption = computed(() => {
       boundaryGap: false,
       data: rows.map((r) => r.gun),
       axisLabel: { color: '#94a3b8' },
-      axisLine: { lineStyle: { color: '#e2e8f0' } },
+      axisLine: { lineStyle: { color: 'rgba(226,232,240,0.6)' } },
     },
     yAxis: {
       type: 'value',
       axisLabel: { color: '#94a3b8', formatter: '%{value}' },
-      splitLine: { lineStyle: { color: '#f1f5f9' } },
+      splitLine: { lineStyle: { color: 'rgba(241,245,249,0.8)' } },
     },
     series: [
       {
@@ -90,15 +85,15 @@ const fuelTrendOption = computed(() => {
         smooth: true,
         data: rows.map((r) => r.tasarruf),
         symbolSize: 8,
-        lineStyle: { width: 3, color: '#2563eb' },
-        itemStyle: { color: '#2563eb' },
+        lineStyle: { width: 3, color: primary },
+        itemStyle: { color: primary },
         areaStyle: {
           color: {
             type: 'linear',
             x: 0, y: 0, x2: 0, y2: 1,
             colorStops: [
-              { offset: 0, color: 'rgba(37,99,235,0.25)' },
-              { offset: 1, color: 'rgba(37,99,235,0.02)' },
+              { offset: 0, color: `${primary}40` },
+              { offset: 1, color: `${primary}05` },
             ],
           },
         },
@@ -109,29 +104,41 @@ const fuelTrendOption = computed(() => {
 </script>
 
 <template>
-  <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
-    <!-- Kritik filo: en düşük skorlar -->
-    <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-      <div class="mb-3 flex items-center gap-2">
-        <span class="h-2.5 w-2.5 rounded-full bg-red-500"></span>
-        <h3 class="text-sm font-bold text-slate-800">En Düşük Sürüş Skoruna Sahip Sürücüler</h3>
+  <div class="mt-6 grid grid-cols-12 gap-4">
+    <!-- Geniş: yakıt trendi -->
+    <div class="rf-glass rf-interactive col-span-12 rounded-3xl p-6 lg:col-span-8">
+      <div class="mb-4 flex items-center gap-3">
+        <span class="rf-icon-ring !h-9 !w-9 shrink-0">
+          <svg class="h-4 w-4 text-brand-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+          </svg>
+        </span>
+        <div>
+          <h3 class="text-base font-black text-slate-900">AI Yakıt Tasarruf Trendi</h3>
+          <p class="text-xs text-slate-500/80">Haftalık performans eğrisi</p>
+        </div>
       </div>
-      <!-- Sabit yükseklikli kapsayıcı: ECharts'in sonsuz büyüme döngüsünü önler. -->
       <div class="h-72 w-full overflow-hidden">
-        <VChart v-if="hasLowest" :option="lowestScoreOption" autoresize style="height: 100%; width: 100%" />
+        <VChart v-if="hasTrend" :option="fuelTrendOption" autoresize style="height: 100%; width: 100%" />
         <div v-else class="grid h-full place-items-center text-sm text-slate-400">Veri yükleniyor...</div>
       </div>
     </div>
 
-    <!-- Yakıt tasarruf trendi -->
-    <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-      <div class="mb-3 flex items-center gap-2">
-        <span class="h-2.5 w-2.5 rounded-full bg-brand-500"></span>
-        <h3 class="text-sm font-bold text-slate-800">AI Yakıt Tasarruf Trendi (Haftalık)</h3>
+    <!-- Dar: düşük skorlar -->
+    <div class="rf-glass rf-interactive col-span-12 rounded-3xl p-6 lg:col-span-4">
+      <div class="mb-4 flex items-center gap-3">
+        <span class="rf-icon-ring !h-9 !w-9 shrink-0 !text-red-600">
+          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01M5.07 19h13.86c1.54 0 2.5-1.67 1.73-3L13.73 4a2 2 0 00-3.46 0L3.34 16c-.77 1.33.19 3 1.73 3z" />
+          </svg>
+        </span>
+        <div>
+          <h3 class="text-base font-black text-slate-900">Risk Altındaki Sürücüler</h3>
+          <p class="text-xs text-slate-500/80">En düşük 5 skor</p>
+        </div>
       </div>
-      <!-- Sabit yükseklikli kapsayıcı: ECharts'in sonsuz büyüme döngüsünü önler. -->
       <div class="h-72 w-full overflow-hidden">
-        <VChart v-if="hasTrend" :option="fuelTrendOption" autoresize style="height: 100%; width: 100%" />
+        <VChart v-if="hasLowest" :option="lowestScoreOption" autoresize style="height: 100%; width: 100%" />
         <div v-else class="grid h-full place-items-center text-sm text-slate-400">Veri yükleniyor...</div>
       </div>
     </div>

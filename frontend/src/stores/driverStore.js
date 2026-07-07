@@ -13,7 +13,7 @@ export const useDriverStore = defineStore('driver', {
 
   getters: {
     driverCount: (state) => state.drivers.length,
-    riskyDrivers: (state) => state.drivers.filter((d) => d.surus_skoru < 70),
+    riskyDrivers: (state) => state.drivers.filter((d) => d.risk_skoru != null && d.risk_skoru >= 61),
   },
 
   actions: {
@@ -28,6 +28,23 @@ export const useDriverStore = defineStore('driver', {
       } finally {
         this.loading = false
       }
+    },
+
+    async createDriver(payload) {
+      const { data } = await apiClient.post('drivers/create/', payload)
+      const existing = this.drivers.findIndex((d) => d.id === data.id)
+      const listItem = {
+        ...data,
+        risk_skoru: data.risk?.skor ?? data.current_risk_score,
+        risk_seviye: data.risk?.seviye,
+        risk_seviye_label: data.risk?.seviye_label ?? '—',
+      }
+      if (existing >= 0) {
+        this.drivers.splice(existing, 1, listItem)
+      } else {
+        this.drivers.unshift(listItem)
+      }
+      return data
     },
 
     async fetchDriverDetail(id) {

@@ -7,7 +7,7 @@ import { useAuthStore } from '../stores/authStore.js'
 const props = defineProps({
   vehicle: { type: Object, required: true },
 })
-const emit = defineEmits(['close'])
+const emit = defineEmits(['close', 'edit'])
 
 const store = useVehicleStore()
 const auth = useAuthStore()
@@ -79,21 +79,19 @@ onBeforeUnmount(() => {
       <div class="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"></div>
 
       <!-- Panel -->
-      <div class="relative z-10 flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-        <!-- Başlık -->
-        <header class="flex items-start justify-between gap-4 border-b border-slate-200 bg-slate-50 px-6 py-4">
-          <div class="flex items-center gap-3">
-            <span class="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-base font-extrabold tracking-wide text-slate-800">
+      <div class="relative z-10 flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl rf-glass-strong shadow-2xl">
+        <div class="rf-accent-bar" />
+        <header class="flex items-start justify-between gap-4 border-b border-white/30 px-6 py-4">
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="rounded-xl border border-white/40 bg-white/50 px-2.5 py-1 text-base font-black tracking-wide text-slate-800 backdrop-blur-sm">
               {{ vehicle.plate_number }}
             </span>
-            <div>
-              <h2 class="text-lg font-bold text-slate-900">{{ vehicle.brand }} {{ vehicle.model }}</h2>
-              <p v-if="vehicle.sinif_etiketi" class="text-sm font-medium text-brand-700">
-                ({{ vehicle.sinif_etiketi }})
-              </p>
-              <p v-if="vehicle.sipp_code" class="text-xs text-slate-400">SIPP: {{ vehicle.sipp_code }}</p>
-              <p v-if="vehicle.sipp_detay" class="text-xs text-slate-500">{{ vehicle.sipp_detay }}</p>
-            </div>
+            <span v-if="vehicle.sipp_code" class="rf-sipp-pill">{{ vehicle.sipp_code }}</span>
+          </div>
+          <div class="mt-2 min-w-0">
+            <h2 class="text-lg font-black text-slate-900">{{ vehicle.brand }} {{ vehicle.model }}</h2>
+            <p v-if="vehicle.sinif_etiketi" class="text-sm font-medium text-brand-700">{{ vehicle.sinif_etiketi }}</p>
+            <p v-if="vehicle.sipp_detay" class="text-xs text-slate-500">{{ vehicle.sipp_detay }}</p>
           </div>
           <button
             type="button"
@@ -275,7 +273,15 @@ onBeforeUnmount(() => {
         </div>
 
         <!-- Alt bar -->
-        <footer class="border-t border-slate-200 bg-slate-50 px-6 py-3 text-right">
+        <footer class="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50 px-6 py-3">
+          <button
+            v-if="auth.isFleetManager"
+            type="button"
+            class="mr-auto rounded-lg border border-brand-200 bg-brand-50 px-4 py-2 text-sm font-semibold text-brand-700 transition hover:bg-brand-100"
+            @click="emit('edit', vehicle)"
+          >
+            Maliyet Bilgilerini Düzenle
+          </button>
           <button
             type="button"
             class="rounded-lg border border-slate-300 bg-white px-5 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
