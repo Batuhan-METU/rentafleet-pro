@@ -57,8 +57,17 @@ INSTALLED_APPS = [
     "rest_framework",
     "rest_framework.authtoken",
     "corsheaders",
-    # Local fleet app
-    "backend.apps.ApiConfig",
+    # Modüler domain app'leri
+    "backend.apps.core.apps.CoreConfig",
+    "backend.apps.companies.apps.CompanyConfig",
+    "backend.apps.vehicles.apps.VehiclesConfig",
+    "backend.apps.customer_profiles.apps.CustomerProfilesConfig",
+    "backend.apps.reservations.apps.ReservationsConfig",
+    "backend.apps.floor_pricing.apps.FloorPricingConfig",
+    "backend.apps.enuygun.apps.EnuygunConfig",
+    "backend.apps.risk_checks.apps.RiskChecksConfig",
+    "backend.apps.analytics.apps.AnalyticsConfig",
+    "backend.apps.ai.apps.AiConfig",
 ]
 
 # Migrations live under backend/migrations/ but keep the historical app label ``api``.
@@ -70,15 +79,16 @@ MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "corsheaders.middleware.CorsMiddleware",  # must precede CommonMiddleware
     "django.contrib.sessions.middleware.SessionMiddleware",
-    "backend.middleware.multi_tenant.MultiTenantMiddleware",
+    "backend.common.middleware.company_router.CompanyRouterMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "backend.common.middleware.company_access_check.CompanyAccessMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
-ROOT_URLCONF = "backend.urls"
+ROOT_URLCONF = "backend.apps.core.api"
 
 TEMPLATES = [
     {
@@ -139,12 +149,7 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
 
 # --- Django REST Framework ---------------------------------------------
-# URL-path versioning (/api/v1/...) lays the groundwork for the next step.
 REST_FRAMEWORK = {
-    "DEFAULT_VERSIONING_CLASS": "rest_framework.versioning.URLPathVersioning",
-    "DEFAULT_VERSION": "v1",
-    "ALLOWED_VERSIONS": ["v1"],
-    "VERSION_PARAM": "version",
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "rest_framework.authentication.TokenAuthentication",
         "rest_framework.authentication.SessionAuthentication",
@@ -164,12 +169,12 @@ CORS_ALLOWED_ORIGINS = _env_list(
     "CORS_ALLOWED_ORIGINS",
     "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000",
 )
-# Yeni kiracı subdomain'leri için yeniden deploy gerekmez.
+# Yeni şirket subdomain'leri için yeniden deploy gerekmez.
 CORS_ALLOWED_ORIGIN_REGEXES = [
     r"^https://[\w-]+\.rentafleetpro\.com$",
     r"^http://[\w-]+\.localhost:\d+$",
 ]
-CORS_ALLOW_HEADERS = (*default_headers, "x-tenant-slug")
+CORS_ALLOW_HEADERS = (*default_headers, "x-company-slug")
 
 
 # --- Password validation ----------------------------------------------
@@ -183,7 +188,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 # --- Internationalization ----------------------------------------------
 LANGUAGE_CODE = "en-us"
-TIME_ZONE = "UTC"
+TIME_ZONE = "Europe/Istanbul"
 USE_I18N = True
 USE_TZ = True
 

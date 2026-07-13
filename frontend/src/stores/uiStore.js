@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 
-const MANAGER_ONLY_VIEWS = new Set(['overview', 'pricing', 'reservations'])
+const MANAGER_ONLY_VIEWS = new Set(['overview', 'pricing', 'reservations', 'settings'])
 
 export const useUiStore = defineStore('ui', {
   state: () => ({
@@ -12,10 +12,7 @@ export const useUiStore = defineStore('ui', {
   actions: {
     initNavigation(isFleetManager) {
       if (this.initialized) return
-      const raw = window.location.hash.replace(/^#\/?/, '').split('?')[0]
-      const fallback = isFleetManager ? 'overview' : 'vehicles'
-      let view = raw || fallback
-      if (!isFleetManager && MANAGER_ONLY_VIEWS.has(view)) view = 'vehicles'
+      const view = this.parseViewFromHash(isFleetManager)
       this.activeView = view
       this.syncHash(view)
       this.initialized = true

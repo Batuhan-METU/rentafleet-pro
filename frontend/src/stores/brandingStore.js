@@ -1,4 +1,4 @@
-// Kiracı white-label marka durumu (subdomain branding).
+// Şirket white-label marka durumu (subdomain branding).
 import { defineStore } from 'pinia'
 import apiClient from '../services/api.js'
 
@@ -23,7 +23,7 @@ export const useBrandingStore = defineStore('branding', {
     logo_url: DEFAULTS.logo_url,
     primary_color: DEFAULTS.primary_color,
     secondary_color: DEFAULTS.secondary_color,
-    tenant_id: null,
+    company_id: null,
     loaded: false,
   }),
 
@@ -42,7 +42,7 @@ export const useBrandingStore = defineStore('branding', {
       this.logo_url = data.logo_url || null
       this.primary_color = data.primary_color || DEFAULTS.primary_color
       this.secondary_color = data.secondary_color || DEFAULTS.secondary_color
-      this.tenant_id = data.tenant_id ?? null
+      this.company_id = data.company_id ?? null
       this._injectCssVariables()
       document.title = this.display_name
     },
@@ -54,7 +54,7 @@ export const useBrandingStore = defineStore('branding', {
         logo_url: user.logo_url ?? user.branding?.logo_url,
         primary_color: user.primary_color || user.branding?.primary_color,
         secondary_color: user.secondary_color || user.branding?.secondary_color,
-        tenant_id: user.company_id,
+        company_id: user.company_id,
       })
     },
 
@@ -74,7 +74,7 @@ export const useBrandingStore = defineStore('branding', {
 
     async fetchBranding() {
       try {
-        const { data } = await apiClient.get('tenant/branding/')
+        const { data } = await apiClient.get('company/branding/')
         this.applyBranding(data)
       } catch {
         this.applyBranding(DEFAULTS)

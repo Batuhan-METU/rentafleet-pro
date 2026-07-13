@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from backend.models import Driver
+from backend.apps.customer_profiles.models import Driver
 
 
 def apply_customer_profiles(driver: Driver, data: dict) -> None:

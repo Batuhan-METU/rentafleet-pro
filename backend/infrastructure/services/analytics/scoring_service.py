@@ -23,7 +23,10 @@ from clickhouse_connect.driver.exceptions import OperationalError
 from django.utils import timezone
 
 from backend.infrastructure.clickhouse.client import get_clickhouse_client, suppress_http_warnings
-from backend.models import Rental, RentalStatus
+from backend.apps.reservations.models import (
+    Rental,
+    RentalStatus,
+)
 
 logger = logging.getLogger(__name__)
 

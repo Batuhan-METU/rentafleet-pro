@@ -2,26 +2,25 @@
 
 from __future__ import annotations
 
-from backend.models import RuleDefinition, RuleEngineType, RuleSet
+from backend.apps.risk_checks.models import (
+    RuleDefinition,
+    RuleEngineType,
+    RuleSet,
+)
 from backend.domain.rule_engine.engine import RuleDefinitionData, RuleEngine
 from backend.domain.risk.rules import build_default_risk_rules
 from backend.domain.shared.enums import RuleEffect
 
 _DEFAULT_RULES = build_default_risk_rules()
 _PREDICATE_BY_CODE = {rule.code: rule.predicate for rule in _DEFAULT_RULES}
-_EFFECT_MAP = {
-    "ADD_SCORE": RuleEffect.ADD_SCORE,
-    "BLOCK": RuleEffect.BLOCK,
-    "WARN": RuleEffect.WARN,
-    "SET_LEVEL": RuleEffect.SET_LEVEL,
-}
-
-
 def _rule_from_db(defn: RuleDefinition) -> RuleDefinitionData | None:
     predicate = _PREDICATE_BY_CODE.get(defn.code)
     if predicate is None:
         return None
-    effect = _EFFECT_MAP.get(defn.effect, RuleEffect.ADD_SCORE)
+    try:
+        effect = RuleEffect(defn.effect)
+    except ValueError:
+        effect = RuleEffect.ADD_SCORE
     return RuleDefinitionData(
         code=defn.code,
         priority=defn.priority,
@@ -32,11 +31,8 @@ def _rule_from_db(defn: RuleDefinition) -> RuleDefinitionData | None:
     )
 
 
-def load_risk_rules(company_id: int | None = None) -> list[RuleDefinitionData]:
+def load_risk_rules(company_id: int) -> list[RuleDefinitionData]:
     """Aktif DB kural setini yükler; yoksa kod tabanlı varsayılanlara düşer."""
-    if company_id is None:
-        return build_default_risk_rules()
-
     rule_set = (
         RuleSet.objects.filter(
             company_id=company_id,
@@ -58,5 +54,5 @@ def load_risk_rules(company_id: int | None = None) -> list[RuleDefinitionData]:
     return resolved if resolved else build_default_risk_rules()
 
 
-def build_risk_engine(company_id: int | None = None) -> RuleEngine:
+def build_risk_engine(company_id: int) -> RuleEngine:
     return RuleEngine("RISK", load_risk_rules(company_id))

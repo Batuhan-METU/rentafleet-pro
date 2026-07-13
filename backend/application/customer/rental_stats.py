@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from django.db.models import Count, Q, Sum
 
-from backend.models import CustomerRentalHistoryStats, Driver, RentalIncome, RentalStatus
+from backend.apps.customer_profiles.models import Driver
+from backend.apps.risk_checks.models import CustomerRentalHistoryStats
+from backend.apps.floor_pricing.models import RentalIncome
+from backend.apps.reservations.models import RentalStatus
 
 
 def sync_rental_history_stats(driver: Driver) -> CustomerRentalHistoryStats:

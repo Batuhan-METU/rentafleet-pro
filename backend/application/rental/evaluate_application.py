@@ -10,18 +10,21 @@ from django.utils import timezone
 
 from backend.application.customer.snapshots import build_customer_snapshot, ensure_customer_profiles
 from backend.application.decision.core import evaluate_customer_risk
-from backend.models import (
-    Company,
-    CustomUser,
+from backend.apps.customer_profiles.models import Driver
+from backend.apps.reservations.choices import RentalStatus
+from backend.apps.risk_checks.models import (
     CustomerRiskSnapshot,
     DecisionStep,
-    Driver,
     RentalApplication,
     RentalApplicationStatus,
     RentalDecisionLog,
     RuleEngineType,
 )
-from backend.domain.eligibility.engine import recommend_vehicles
+from backend.apps.companies.models import (
+    Company,
+    CustomUser,
+)
+
 from backend.domain.shared.types import EvaluateRentalResult
 
 
@@ -37,7 +40,7 @@ class RentalApplicationService:
         requested_return_at: datetime | None = None,
     ) -> RentalApplication:
         ensure_customer_profiles(driver)
-        completed = driver.rentals.filter(status="COMPLETED").count()
+        completed = driver.rentals.filter(status=RentalStatus.COMPLETED).count()
         application = RentalApplication.objects.create(
             company=company,
             driver=driver,
@@ -139,14 +142,15 @@ class RentalApplicationService:
             risk=bundle.risk_result,
             approved=bundle.approved,
             recommended_vehicle_ids=tuple(v["vehicle_id"] for v in vehicles),
+            vehicles=tuple(vehicles),
             quote={"deposit_amount": deposit} if deposit is not None else None,
         )
 
     def serialize_evaluation(self, result: EvaluateRentalResult, application: RentalApplication) -> dict[str, Any]:
-        vehicles = recommend_vehicles(
-            application.company_id,
-            result.risk.level or "MEDIUM",
-        ) if result.risk.level else []
+        # evaluate() sırasında hesaplanan/loglanan liste yeniden kullanılır;
+        # tekrar recommend_vehicles() çağrılırsa audit log ile API yanıtı
+        # araç durumu bu ikisi arasında değişmişse farklılaşabilirdi.
+        vehicles = list(result.vehicles)
 
         return {
             "application_id": application.pk,

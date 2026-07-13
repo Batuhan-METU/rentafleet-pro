@@ -6,15 +6,18 @@ export const useFinanceStore = defineStore('finance', {
   state: () => ({
     categories: [],
     quoteById: {},
+    decisionById: {},
     expensesById: {},
     incomesById: {},
     saving: false,
     quoteLoading: false,
+    offerPreviewLoading: false,
     error: null,
   }),
 
   getters: {
     quoteFor: (state) => (vehicleId) => state.quoteById[vehicleId] ?? null,
+    decisionFor: (state) => (vehicleId) => state.decisionById[vehicleId] ?? null,
     expensesFor: (state) => (vehicleId) => state.expensesById[vehicleId] ?? [],
     incomesFor: (state) => (vehicleId) => state.incomesById[vehicleId] ?? [],
   },
@@ -55,15 +58,23 @@ export const useFinanceStore = defineStore('finance', {
       }
     },
 
-    async fetchRentalQuote(vehicleId, { force = false, baslangic = null, bitis = null } = {}) {
-      const cacheKey = `${vehicleId}:${baslangic ?? ''}:${bitis ?? ''}`
-      if (!force && this.quoteById[cacheKey]) {
-        this.quoteById = { ...this.quoteById, [vehicleId]: this.quoteById[cacheKey] }
-        return this.quoteById[cacheKey]
+    async fetchPricingDecision(
+      vehicleId,
+      { force = false, baslangic = null, bitis = null, teklif = null } = {},
+    ) {
+      const cacheKey = `${vehicleId}:${baslangic ?? ''}:${bitis ?? ''}:${teklif ?? ''}`
+      if (!force && this.decisionById[cacheKey]) {
+        this.decisionById = { ...this.decisionById, [vehicleId]: this.decisionById[cacheKey] }
+        if (this.decisionById[cacheKey]?.kiralama) {
+          this.quoteById = { ...this.quoteById, [vehicleId]: this.decisionById[cacheKey].kiralama }
+        }
+        return this.decisionById[cacheKey]
       }
 
-      const hadQuote = !!this.quoteById[vehicleId]
-      if (!hadQuote) this.quoteLoading = true
+      const hadDecision = !!this.decisionById[vehicleId]
+      const isOfferRefresh = hadDecision && teklif != null && teklif > 0
+      if (!hadDecision) this.quoteLoading = true
+      else if (isOfferRefresh) this.offerPreviewLoading = true
       this.error = null
       try {
         const params = {}
@@ -71,19 +82,30 @@ export const useFinanceStore = defineStore('finance', {
           params.baslangic_tarihi = baslangic
           params.bitis_tarihi = bitis
         }
+        if (teklif != null && teklif > 0) {
+          params.teklif = teklif
+        }
 
-        const { data } = await apiClient.get(`vehicles/${vehicleId}/rental-quote/`, {
+        const { data } = await apiClient.get(`vehicles/${vehicleId}/pricing-decision/`, {
           params,
           timeout: 30000,
         })
-        this.quoteById = { ...this.quoteById, [cacheKey]: data, [vehicleId]: data }
+        this.decisionById = { ...this.decisionById, [cacheKey]: data, [vehicleId]: data }
+        if (data.kiralama) {
+          this.quoteById = { ...this.quoteById, [vehicleId]: data.kiralama }
+        }
         return data
       } catch (err) {
-        this.error = 'Kiralama fiyatı hesaplanamadı.'
+        this.error = 'Fiyat karar desteği yüklenemedi.'
         throw err
       } finally {
         this.quoteLoading = false
+        this.offerPreviewLoading = false
       }
+    },
+
+    async fetchRentalQuote(vehicleId, { force = false, baslangic = null, bitis = null } = {}) {
+      return this.fetchPricingDecision(vehicleId, { force, baslangic, bitis })
     },
 
     async fetchProfile(vehicleId) {

@@ -5,7 +5,12 @@ from __future__ import annotations
 from django.core.management.base import BaseCommand
 
 from backend.domain.risk.rules import build_default_risk_rules
-from backend.models import Company, RuleDefinition, RuleEngineType, RuleSet
+from backend.apps.risk_checks.models import (
+    RuleDefinition,
+    RuleEngineType,
+    RuleSet,
+)
+from backend.apps.companies.models import Company
 
 
 class Command(BaseCommand):

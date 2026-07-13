@@ -18,18 +18,23 @@ from django.core.management.base import BaseCommand, CommandParser
 from django.db import transaction
 
 from backend.management.commands.seed_data import SEED_VEHICLE_CATALOG
-from backend.models import (
-    Company,
-    CustomUser,
+from backend.apps.customer_profiles.models import (
     Driver,
     Gender,
+)
+from backend.apps.floor_pricing.models import VehicleFinancialProfile
+from backend.apps.companies.models import (
+    Company,
+    CustomUser,
     UserRole,
+)
+from backend.apps.vehicles.models import (
     Vehicle,
     VehicleCondition,
-    VehicleFinancialProfile,
     VehicleStatus,
 )
-from backend.models.vehicle import FuelType, Transmission
+
+from backend.apps.vehicles.models import FuelType, Transmission
 
 DEFAULT_VEHICLES_PER_TENANT = 25
 

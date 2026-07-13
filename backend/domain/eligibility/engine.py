@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
-from backend.domain.shared.enums import RiskLevel
-from backend.models import Vehicle, VehicleRiskTier, VehicleStatus, VehicleTier
+from backend.domain.shared.enums import RiskLevel, VehicleTier
+from backend.apps.risk_checks.models import VehicleRiskTier
+from backend.apps.vehicles.models import (
+    Vehicle,
+    VehicleStatus,
+)
 
 RISK_TO_ALLOWED_TIERS: dict[RiskLevel, frozenset[VehicleTier]] = {
     RiskLevel.VERY_LOW: frozenset({VehicleTier.PREMIUM, VehicleTier.STANDARD, VehicleTier.ECONOMY}),

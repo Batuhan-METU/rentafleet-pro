@@ -9,7 +9,8 @@ from django.db import transaction
 
 from backend.application.customer.snapshots import build_customer_snapshot, ensure_customer_profiles
 from backend.application.decision.core import RISK_LEVEL_LABELS, evaluate_customer_risk
-from backend.models import CustomerRiskSnapshot, Driver
+from backend.apps.customer_profiles.models import Driver
+from backend.apps.risk_checks.models import CustomerRiskSnapshot
 
 
 @dataclass(frozen=True)

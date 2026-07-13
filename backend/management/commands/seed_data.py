@@ -38,7 +38,23 @@ from backend.infrastructure.clickhouse.client import (
     get_clickhouse_client,
     suppress_http_warnings,
 )
-from backend.models import Company, CustomUser, Driver, Gender, Rental, RentalStatus, UserRole, Vehicle, VehicleStatus
+from backend.apps.customer_profiles.models import (
+    Driver,
+    Gender,
+)
+from backend.apps.reservations.models import (
+    Rental,
+    RentalStatus,
+)
+from backend.apps.companies.models import (
+    Company,
+    CustomUser,
+    UserRole,
+)
+from backend.apps.vehicles.models import (
+    Vehicle,
+    VehicleStatus,
+)
 
 # --- Tunable defaults --------------------------------------------------
 DEFAULT_COMPANIES = 1  # single-tenant: kurulum başına tek şirket
@@ -514,7 +530,7 @@ class Command(BaseCommand):
 
     def _flush(self, skip_telemetry: bool = False) -> None:
         self.stdout.write(self.style.WARNING("Flushing existing seeded data..."))
-        from backend.models import CompetitorPrice
+        from backend.apps.enuygun.models import CompetitorPrice
 
         CompetitorPrice.objects.all().delete()
         Vehicle.objects.all().delete()

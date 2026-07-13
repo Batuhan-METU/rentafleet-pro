@@ -6,14 +6,15 @@ from datetime import date
 
 from backend.application.customer.rental_stats import sync_rental_history_stats
 from backend.domain.shared.types import CustomerSnapshot
-from backend.models import (
+from backend.apps.customer_profiles.models import Driver
+from backend.apps.risk_checks.models import (
     CustomerFinancialProfile,
     CustomerIdentityProfile,
     CustomerLicenseProfile,
     CustomerRentalHistoryStats,
-    Driver,
-    RentalStatus,
 )
+from backend.apps.reservations.models import RentalStatus
+
 
 
 def _age_years(birth_date: date) -> int:

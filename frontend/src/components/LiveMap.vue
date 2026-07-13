@@ -7,17 +7,19 @@ import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { useVehicleStore } from '../stores/vehicleStore.js'
+import { VEHICLE_STATUS_LABELS } from '../utils/vehicleStatus.js'
 
 const store = useVehicleStore()
 
 const ANKARA = [39.9334, 32.8597]
 const SPEEDING_KMH = 120
 
-// Durum kodu -> renk + Türkçe etiket.
+// Durum kodu -> harita pin rengi. Etiket metni ../utils/vehicleStatus.js'den
+// (TEK kaynak); pin rengi bu bileşene özel bir görsel seçimdir.
 const STATUS = {
-  AVAILABLE: { color: '#10b981', label: 'Müsait' },
-  RENTED: { color: '#3b82f6', label: 'Kirada' },
-  MAINTENANCE: { color: '#f59e0b', label: 'Bakımda' },
+  AVAILABLE: { color: '#10b981', label: VEHICLE_STATUS_LABELS.AVAILABLE },
+  RENTED: { color: '#3b82f6', label: VEHICLE_STATUS_LABELS.RENTED },
+  MAINTENANCE: { color: '#f59e0b', label: VEHICLE_STATUS_LABELS.MAINTENANCE },
 }
 const CRITICAL_COLOR = '#991b1b'
 
@@ -177,9 +179,9 @@ const lastUpdateText = computed(() =>
 
       <div class="ml-auto flex items-center gap-4">
         <div class="hidden items-center gap-3 text-xs text-slate-600 lg:flex">
-          <span class="flex items-center gap-1.5"><span class="h-3 w-3 rounded-full bg-emerald-500"></span>Müsait</span>
-          <span class="flex items-center gap-1.5"><span class="h-3 w-3 rounded-full bg-blue-500"></span>Kirada</span>
-          <span class="flex items-center gap-1.5"><span class="h-3 w-3 rounded-full bg-amber-500"></span>Bakımda</span>
+          <span class="flex items-center gap-1.5"><span class="h-3 w-3 rounded-full bg-emerald-500"></span>{{ STATUS.AVAILABLE.label }}</span>
+          <span class="flex items-center gap-1.5"><span class="h-3 w-3 rounded-full bg-blue-500"></span>{{ STATUS.RENTED.label }}</span>
+          <span class="flex items-center gap-1.5"><span class="h-3 w-3 rounded-full bg-amber-500"></span>{{ STATUS.MAINTENANCE.label }}</span>
           <span class="flex items-center gap-1.5"><span class="h-3 w-3 rounded-full bg-red-800"></span>Kritik</span>
         </div>
         <span class="text-xs text-slate-400">Son güncelleme: {{ lastUpdateText }}</span>

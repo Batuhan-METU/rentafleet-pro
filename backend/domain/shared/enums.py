@@ -1,4 +1,8 @@
-"""Paylaşılan domain enum'ları."""
+"""Paylaşılan domain enum'ları — değerlerin tek kaynağı.
+
+Django model alanları için `backend.apps.risk_checks.choices` bu enum'ları
+TextChoices olarak sarmalar (etiket çevirileri orada).
+"""
 
 from __future__ import annotations
 
@@ -18,3 +22,9 @@ class RuleEffect(StrEnum):
     BLOCK = "BLOCK"
     WARN = "WARN"
     SET_LEVEL = "SET_LEVEL"
+
+
+class VehicleTier(StrEnum):
+    PREMIUM = "PREMIUM"
+    STANDARD = "STANDARD"
+    ECONOMY = "ECONOMY"

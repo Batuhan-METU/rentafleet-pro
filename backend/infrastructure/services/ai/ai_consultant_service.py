@@ -28,7 +28,7 @@ from backend.infrastructure.services.pricing.pricing_service import (
     LOW_OCCUPANCY_THRESHOLD,
 )
 from backend.infrastructure.services.analytics.scoring_service import SAFE_DRIVER_THRESHOLD
-from backend.models import Vehicle
+from backend.apps.vehicles.models import Vehicle
 
 logger = logging.getLogger(__name__)
 
@@ -76,17 +76,15 @@ def _demand_state(occupancy: float) -> tuple[str, float]:
     return "normal", 1.0
 
 
-def _build_fleet_context(company_id: int | None = None) -> FleetContext:
+def _build_fleet_context(company_id: int) -> FleetContext:
     """Analytics, bakım ve anomali servislerinden anlık özet üretir."""
-    analytics = get_fleet_analytics(company_id=company_id)
-    maintenance_alerts = get_maintenance_alerts(company_id=company_id)
+    analytics = get_fleet_analytics(company_id)
+    maintenance_alerts = get_maintenance_alerts(company_id)
 
     if analytics.total == 0:
         return FleetContext()
 
-    vehicle_qs = Vehicle.objects.all()
-    if company_id is not None:
-        vehicle_qs = vehicle_qs.filter(company_id=company_id)
+    vehicle_qs = Vehicle.objects.filter(company_id=company_id)
     high_mileage = vehicle_qs.filter(current_km__gt=HIGH_MILEAGE_KM).count()
     demand_state, multiplier = _demand_state(analytics.occupancy_rate)
     avg_price = (BASE_PRICE * multiplier) - (
@@ -303,7 +301,7 @@ def _simulate_stream(text: str, *, delay: float = FALLBACK_STREAM_DELAY_SEC) -> 
 def stream_ai_fleet_advice(
     user_query: str,
     *,
-    company_id: int | None = None,
+    company_id: int,
 ) -> Iterator[str]:
     """Kullanıcı sorusuna stream chunk'ları üretir."""
     query = (user_query or "").strip()
@@ -325,7 +323,7 @@ def stream_ai_fleet_advice(
 def stream_ai_fleet_advice_sse(
     user_query: str,
     *,
-    company_id: int | None = None,
+    company_id: int,
 ) -> Iterator[str]:
     """SSE formatında satırlar üretir."""
     try:
@@ -336,4 +334,3 @@ def stream_ai_fleet_advice_sse(
     except Exception as exc:
         logger.exception("AI danışman stream hatası")
         yield f"data: {json.dumps({'error': str(exc)}, ensure_ascii=False)}\n\n"
-

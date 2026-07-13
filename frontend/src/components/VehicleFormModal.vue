@@ -26,22 +26,26 @@ onBeforeUnmount(() => {
 
 <template>
   <Teleport to="body">
-    <div class="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4 sm:p-6" @click.self="emit('close')">
-      <div class="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"></div>
-      <div class="relative my-4 w-full max-w-5xl overflow-hidden rounded-3xl rf-glass-strong shadow-2xl">
-        <div class="rf-accent-bar" />
-        <header class="sticky top-0 z-10 flex items-center justify-between border-b border-white/30 bg-white/40 px-6 py-4 backdrop-blur-md">
-          <div>
-            <h2 class="text-lg font-bold text-slate-900">
+    <div class="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
+      <div class="absolute inset-0 bg-slate-900/50" aria-hidden="true" @click="emit('close')" />
+
+      <div
+        class="relative z-10 flex max-h-[min(90vh,100dvh-2rem)] w-full max-w-5xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl"
+        role="dialog"
+        aria-modal="true"
+      >
+        <header class="flex shrink-0 items-start justify-between gap-4 border-b border-slate-200 px-6 py-4">
+          <div class="min-w-0">
+            <h2 class="text-lg font-semibold leading-tight text-slate-900">
               {{ editVehicle ? 'Araç Bilgilerini Düzenle' : 'Yeni Araç Ekle' }}
             </h2>
-            <p class="text-sm text-slate-500">
+            <p class="mt-1 text-sm leading-snug text-slate-500">
               Maliyet ve fiyat önerileri bu bilgilere göre otomatik hesaplanır.
             </p>
           </div>
           <button
             type="button"
-            class="grid h-9 w-9 place-items-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+            class="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
             aria-label="Kapat"
             @click="emit('close')"
           >
@@ -50,7 +54,8 @@ onBeforeUnmount(() => {
             </svg>
           </button>
         </header>
-        <div class="px-6 py-5">
+
+        <div class="flex-1 overflow-y-auto overscroll-contain px-6 py-5">
           <VehicleFinanceForm
             :edit-vehicle="editVehicle"
             :edit-profile="editProfile"

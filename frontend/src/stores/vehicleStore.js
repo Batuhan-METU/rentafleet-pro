@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import apiClient from '../services/api.js'
+import { VEHICLE_STATUS_LABELS } from '../utils/vehicleStatus.js'
 
 // Canlı takip zamanlayıcısı store state'i DIŞINDA tutulur: interval kimliği
 // reaktif/serileştirilebilir bir değer olmamalı ve birden fazla kez
@@ -15,28 +16,57 @@ function todayLocalDate() {
   return `${y}-${m}-${day}`
 }
 
+const MARKET_CACHE_PREFIX = 'rf_market_v1_'
+
 function vehicleMarketCacheKey(vehicleId, baslangic = null, bitis = null) {
-  if (!baslangic && !bitis) return `rf_market_v1_${todayLocalDate()}_${vehicleId}`
-  return `rf_market_v1_${baslangic}_${bitis}_${vehicleId}`
+  if (!baslangic && !bitis) return `${MARKET_CACHE_PREFIX}${todayLocalDate()}_${vehicleId}`
+  return `${MARKET_CACHE_PREFIX}${baslangic}_${bitis}_${vehicleId}`
 }
 
-// Backend'in İngilizce durum kodlarının Türkçe karşılıkları + Tailwind
-// renk sınıfları. Dönüşüm mantığının TEK kaynağı burasıdır.
+// Yalnızca "varsayılan pencere" anahtarlarını hedefler (rf_market_v1_<tarih>_<id>);
+// açık alış/dönüş pencereli anahtarlar (rf_market_v1_<alis>_<donus>_<id>) kullanıcının
+// aradığı belirli tarih aralıklarını temsil eder ve kendi kendini sınırlar, silinmez.
+const DEFAULT_WINDOW_KEY_RE = /^rf_market_v1_(\d{4}-\d{2}-\d{2})_[^_]+$/
+
+// Bugüne ait olmayan varsayılan-pencere market önbelleklerini temizler;
+// aksi halde localStorage her gün yeni bir anahtar biriktirir ve hiç boşalmaz.
+function pruneStaleMarketCache() {
+  const today = todayLocalDate()
+  const staleKeys = []
+  for (let i = 0; i < localStorage.length; i += 1) {
+    const key = localStorage.key(i)
+    const match = key && key.match(DEFAULT_WINDOW_KEY_RE)
+    if (match && match[1] !== today) {
+      staleKeys.push(key)
+    }
+  }
+  for (const key of staleKeys) {
+    try {
+      localStorage.removeItem(key)
+    } catch {
+      // localStorage erişilemedi; sessizce geç
+    }
+  }
+}
+
+// Backend'in İngilizce durum kodlarının Tailwind renk sınıfları. Etiket
+// metinleri ../utils/vehicleStatus.js'den gelir (TEK kaynak); buradaki
+// renk/stil seçimleri yalnızca bu bileşen bağlamına özeldir.
 const STATUS_MAP = {
   AVAILABLE: {
-    label: 'Müsait',
+    label: VEHICLE_STATUS_LABELS.AVAILABLE,
     badge: 'bg-emerald-100 text-emerald-700 ring-emerald-600/20',
     dot: 'bg-emerald-500',
     accent: 'text-emerald-600',
   },
   RENTED: {
-    label: 'Kirada',
+    label: VEHICLE_STATUS_LABELS.RENTED,
     badge: 'bg-blue-100 text-blue-700 ring-blue-600/20',
     dot: 'bg-blue-500',
     accent: 'text-blue-600',
   },
   MAINTENANCE: {
-    label: 'Bakımda',
+    label: VEHICLE_STATUS_LABELS.MAINTENANCE,
     badge: 'bg-red-100 text-red-700 ring-red-600/20',
     dot: 'bg-red-500',
     accent: 'text-red-600',
@@ -56,13 +86,6 @@ export const useVehicleStore = defineStore('vehicle', {
     loading: false,
     error: false,
 
-    // Seçili aracın detay (AI/analitik) verileri — modal kullanır.
-    currentVehicleScore: null,
-    currentVehicleFuelData: null,
-    currentVehicleAnomalies: null,
-    detailLoading: false,
-    detailError: false,
-
     // Kart rozetleri kaldırıldı — skor artık sürücüye aittir (driverStore).
     // Piyasa rakip fiyatları (PricingManager).
     competitorPricesById: {},
@@ -75,10 +98,6 @@ export const useVehicleStore = defineStore('vehicle', {
     // Canlı takip: tüm araçların en güncel konum/hız/durum verisi.
     liveVehicles: [],
     liveTracking: false,
-
-    // Dashboard analitiği (metrik kartları + grafikler).
-    fleetAnalytics: null,
-    analyticsLoading: false,
 
     // Öngörücü bakım uyarıları.
     maintenanceAlerts: [],
@@ -119,6 +138,7 @@ export const useVehicleStore = defineStore('vehicle', {
       this.loading = true
       this.error = false
       try {
+        pruneStaleMarketCache()
         const all = []
         let page = 1
         let hasMore = true
@@ -141,27 +161,15 @@ export const useVehicleStore = defineStore('vehicle', {
       }
     },
 
-    // Güncel kiracının skorunu çeker (skor sürücüye aittir).
-    async fetchCurrentRenterScore(vehicleId) {
-      const { data } = await apiClient.get(`vehicles/${vehicleId}/current-renter-score/`)
-      if (!data.kiraci_var_mi) {
-        this.currentVehicleScore = null
-        return null
-      }
-      this.currentVehicleScore = {
-        driver_id: data.driver_id,
-        driver_score: data.driver_score,
-        summary: data.summary,
-      }
-      return this.currentVehicleScore
-    },
-
     async fetchCompetitorPrices(id, { force = false, baslangic = null, bitis = null } = {}) {
       const slot = this.marketSlotKey(id, baslangic, bitis)
       const params = {}
       if (baslangic && bitis) {
         params.baslangic_tarihi = baslangic
         params.bitis_tarihi = bitis
+      }
+      if (force) {
+        params.force = 'true'
       }
       const cacheKey = vehicleMarketCacheKey(id, baslangic, bitis)
 
@@ -188,7 +196,7 @@ export const useVehicleStore = defineStore('vehicle', {
       try {
         const { data } = await apiClient.get(`vehicles/${id}/competitor-prices/`, {
           params,
-          timeout: baslangic && bitis ? 120000 : 15000,
+          timeout: 120000,
         })
         this._applyVehicleCompetitorPayload(slot, data)
         try {
@@ -230,7 +238,7 @@ export const useVehicleStore = defineStore('vehicle', {
         }
         const { data } = await apiClient.get('fleet/competitor-prices/', {
           params,
-          timeout: baslangic && bitis ? 120000 : 120000,
+          timeout: 120000,
         })
         const araclar = data.araclar ?? {}
         this._applyCompetitorPayloadMap(araclar, data.arama)
@@ -240,10 +248,6 @@ export const useVehicleStore = defineStore('vehicle', {
       } finally {
         this.marketSyncing = false
       }
-    },
-
-    async syncFleetMarketPrices() {
-      return this.fetchAllCompetitorPrices({ force: true })
     },
 
     _applyCompetitorPayloadMap(araclar, aramaFallback = null) {
@@ -276,54 +280,6 @@ export const useVehicleStore = defineStore('vehicle', {
       return payload.piyasa_teklifleri ?? []
     },
 
-    // Tek aracın güncel kiracı skorunu çeker.
-    async fetchVehicleScore(id) {
-      return this.fetchCurrentRenterScore(id)
-    },
-
-    // Tek aracın yakıt optimizasyon verisini çeker. Hata orkestratöre fırlatılır.
-    async fetchVehicleFuelData(id) {
-      const { data } = await apiClient.get(`vehicles/${id}/fuel-optimization/`)
-      this.currentVehicleFuelData = data
-      return data
-    },
-
-    // Tek aracın güvenlik anomalilerini çeker. Hata orkestratöre fırlatılır.
-    async fetchVehicleAnomalies(id) {
-      const { data } = await apiClient.get(`vehicles/${id}/anomalies/`)
-      this.currentVehicleAnomalies = data
-      return data
-    },
-
-    // Modal için skor + yakıt + anomali verisini paralel yükleyen orkestratör.
-    async loadVehicleDetail(id) {
-      this.detailLoading = true
-      this.detailError = false
-      this.currentVehicleScore = null
-      this.currentVehicleFuelData = null
-      this.currentVehicleAnomalies = null
-      try {
-        await Promise.all([
-          this.fetchVehicleScore(id),
-          this.fetchVehicleFuelData(id),
-          this.fetchVehicleAnomalies(id),
-        ])
-      } catch {
-        this.detailError = true
-      } finally {
-        this.detailLoading = false
-      }
-    },
-
-    // Modal kapanınca detay durumunu sıfırlar.
-    clearVehicleDetail() {
-      this.currentVehicleScore = null
-      this.currentVehicleFuelData = null
-      this.currentVehicleAnomalies = null
-      this.detailError = false
-      this.detailLoading = false
-    },
-
     // Tüm araçların en güncel canlı konumunu çeker; hata olursa eski veriyi
     // korur (canlı ekran "donmaz", bir sonraki başarılı çağrıda güncellenir).
     async fetchLiveStream() {
@@ -353,22 +309,6 @@ export const useVehicleStore = defineStore('vehicle', {
         liveTimer = null
       }
       this.liveTracking = false
-    },
-
-    // Dashboard analitiğini çeker. Eşzamanlı/tekrar çağrılara karşı korumalı;
-    // veri zaten varsa yeniden çekmez (force=true ile zorlanabilir).
-    async fetchFleetAnalytics(force = false) {
-      if (this.analyticsLoading) return
-      if (this.fleetAnalytics && !force) return
-      this.analyticsLoading = true
-      try {
-        const { data } = await apiClient.get('fleet/analytics/')
-        this.fleetAnalytics = data
-      } catch {
-        // Analitik gösterilemez; dashboard'ın geri kalanı çalışmaya devam eder.
-      } finally {
-        this.analyticsLoading = false
-      }
     },
 
     // Öngörücü bakım uyarılarını çeker.

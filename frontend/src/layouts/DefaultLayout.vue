@@ -10,13 +10,14 @@ const ui = useUiStore()
 const { activeView } = storeToRefs(ui)
 
 const PAGE_META = {
-  overview: { title: 'Genel Bakış', subtitle: 'Filonuzu tek ekrandan yönetin' },
+  overview: { title: 'Ev', subtitle: '' },
   vehicles: { title: 'Araçlar', subtitle: 'Tüm filo araçlarını görüntüleyin ve filtreleyin' },
   drivers: { title: 'Sürücüler', subtitle: 'Müşteri sürücü profilleri, skorlar ve kiralama geçmişi' },
   live: { title: 'Canlı Takip', subtitle: 'Araçlarınızı harita üzerinde gerçek zamanlı izleyin' },
   maintenance: { title: 'Bakım Merkezi', subtitle: 'Öngörücü bakım uyarıları ve araç yıpranma durumu' },
   pricing: { title: 'Fiyatlandırma', subtitle: 'Piyasa fiyatları + maliyet tabanlı fiyat önerisi' },
   reservations: { title: 'Rezervasyonlar', subtitle: 'Araç–sürücü atamaları ve kiralama kayıtları' },
+  settings: { title: 'Ayarlar', subtitle: 'Şirket profili, marka ve personel yönetimi' },
 }
 
 const pageMeta = computed(() => PAGE_META[activeView.value] ?? PAGE_META.overview)
@@ -50,12 +51,12 @@ onBeforeUnmount(() => {
     <AppSidebar :active-view="activeView" @navigate="navigate" @logout="logout" />
 
     <div class="flex min-w-0 flex-1 flex-col overflow-hidden">
-      <header class="rf-glass-strong rf-header-slice flex shrink-0 items-center justify-between gap-4 border-b border-white/30 px-6 py-5">
-        <div>
-          <h1 class="rf-section-title">{{ pageMeta.title }}</h1>
-          <p class="rf-section-sub mt-0.5">{{ pageMeta.subtitle }}</p>
+      <header class="flex shrink-0 items-center justify-between gap-4 border-b border-slate-200 bg-white px-6 py-4">
+        <div class="min-w-0">
+          <h1 class="rf-section-title leading-tight">{{ pageMeta.title }}</h1>
+          <p v-if="pageMeta.subtitle" class="rf-section-sub mt-1 leading-snug">{{ pageMeta.subtitle }}</p>
         </div>
-        <div class="flex items-center gap-3">
+        <div class="flex flex-wrap items-center justify-end gap-3">
           <slot name="actions" :active-view="activeView" :navigate="navigate" />
         </div>
       </header>

@@ -19,7 +19,11 @@ import logging
 from dataclasses import dataclass, field
 
 from backend.infrastructure.clickhouse.client import suppress_http_warnings
-from backend.models import Driver, Vehicle, VehicleStatus
+from backend.apps.customer_profiles.models import Driver
+from backend.apps.vehicles.models import (
+    Vehicle,
+    VehicleStatus,
+)
 from backend.infrastructure.services.analytics.anomaly_service import detect_fleet_critical_vehicle_ids
 from backend.infrastructure.services.common.logging_utils import quiet_loggers
 from backend.infrastructure.services.analytics.scoring_service import calculate_driver_score
@@ -57,13 +61,10 @@ def _weekly_savings_trend(avg_score: float) -> list[dict]:
     ]
 
 
-def get_fleet_analytics(company_id: int | None = None) -> FleetAnalytics:
+def get_fleet_analytics(company_id: int) -> FleetAnalytics:
     """Şirkete bağlı filoyu toplayıp dashboard metriklerini döndürür."""
-    vehicle_qs = Vehicle.objects.all()
-    driver_qs = Driver.objects.all()
-    if company_id is not None:
-        vehicle_qs = vehicle_qs.filter(company_id=company_id)
-        driver_qs = driver_qs.filter(company_id=company_id)
+    vehicle_qs = Vehicle.objects.filter(company_id=company_id)
+    driver_qs = Driver.objects.filter(company_id=company_id)
 
     vehicles = list(vehicle_qs.values("id", "plate_number", "status"))
     total = len(vehicles)

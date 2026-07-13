@@ -2,7 +2,7 @@
 import { ref } from 'vue'
 import { useAuthStore } from '../stores/authStore.js'
 import { useBrandingStore } from '../stores/brandingStore.js'
-import { setTenantSlug } from '../utils/tenant.js'
+import { setCompanySlug } from '../utils/company.js'
 
 const auth = useAuthStore()
 const branding = useBrandingStore()
@@ -10,11 +10,11 @@ const username = ref('')
 const password = ref('')
 
 const demoAccounts = [
-  { label: 'Ahmet Rent A Car', user: 'ahmet_mudur', pass: 'ahmet123', tenant: 'ahmet' },
-  { label: 'Ercan Rent A Car', user: 'ercan_mudur', pass: 'ercan123', tenant: 'ercan' },
+  { label: 'Ahmet Rent A Car', user: 'ahmet_mudur', pass: 'ahmet123', company: 'ahmet' },
+  { label: 'Ercan Rent A Car', user: 'ercan_mudur', pass: 'ercan123', company: 'ercan' },
 ]
 
-const trustItems = ['Canlı Takip', 'AI Analiz', 'Piyasa Fiyatı', 'White-Label', 'Kiracı İzolasyonu']
+const trustItems = ['Canlı Takip', 'AI Analiz', 'Piyasa Fiyatı', 'White-Label', 'Şirket İzolasyonu']
 
 async function submit() {
   if (!username.value.trim() || !password.value) return
@@ -22,7 +22,7 @@ async function submit() {
 }
 
 async function loginAsDemo(account) {
-  setTenantSlug(account.tenant)
+  setCompanySlug(account.company)
   username.value = account.user
   password.value = account.pass
   await branding.fetchBranding()

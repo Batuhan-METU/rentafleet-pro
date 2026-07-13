@@ -9,9 +9,8 @@ import DefaultLayout from '../layouts/DefaultLayout.vue'
 import VehicleCard from '../components/VehicleCard.vue'
 import VehicleDetailModal from '../components/VehicleDetailModal.vue'
 import LiveMap from '../components/LiveMap.vue'
-import FleetStats from '../components/FleetStats.vue'
-import FleetCharts from '../components/FleetCharts.vue'
-import FleetHighlights from '../components/FleetHighlights.vue'
+import OverviewDashboard from '../components/overview/OverviewDashboard.vue'
+import SettingsPage from '../components/settings/SettingsPage.vue'
 import MaintenanceCenter from '../components/MaintenanceCenter.vue'
 import DriverCard from '../components/DriverCard.vue'
 import DriverDetailModal from '../components/DriverDetailModal.vue'
@@ -27,6 +26,7 @@ import { useRentalStore } from '../stores/rentalStore.js'
 import { useVehicles } from '../composables/useVehicles.js'
 import { useAuthStore } from '../stores/authStore.js'
 import { useUiStore } from '../stores/uiStore.js'
+import { VEHICLE_STATUS_LABELS } from '../utils/vehicleStatus.js'
 
 const auth = useAuthStore()
 const ui = useUiStore()
@@ -67,9 +67,9 @@ const statusFilter = ref('ALL')
 
 const statusFilters = [
   { id: 'ALL', label: 'Tümü' },
-  { id: 'AVAILABLE', label: 'Müsait' },
-  { id: 'RENTED', label: 'Kirada' },
-  { id: 'MAINTENANCE', label: 'Bakımda' },
+  { id: 'AVAILABLE', label: VEHICLE_STATUS_LABELS.AVAILABLE },
+  { id: 'RENTED', label: VEHICLE_STATUS_LABELS.RENTED },
+  { id: 'MAINTENANCE', label: VEHICLE_STATUS_LABELS.MAINTENANCE },
 ]
 
 const filteredVehicles = computed(() => {
@@ -82,8 +82,6 @@ const filteredVehicles = computed(() => {
       .includes(q)
   })
 })
-
-const recentVehicles = computed(() => vehicles.value.slice(0, 8))
 
 const filteredDrivers = computed(() => {
   const q = driverSearch.value.trim().toLocaleLowerCase('tr')
@@ -325,7 +323,7 @@ watch(activeView, (view) => {
       </div>
 
       <!-- Yükleniyor (araç verisi) -->
-      <div v-if="loading && (activeView === 'overview' || activeView === 'vehicles')" class="grid h-full place-items-center">
+      <div v-if="loading && activeView === 'vehicles'" class="grid h-full place-items-center">
         <div class="text-center">
           <div class="mx-auto h-12 w-12 animate-spin rounded-full border-4 border-slate-200 border-t-brand-600"></div>
           <p class="mt-4 text-base font-semibold text-slate-700">Veriler yükleniyor...</p>
@@ -334,7 +332,7 @@ watch(activeView, (view) => {
       </div>
 
       <!-- Hata (araç verisi) -->
-      <div v-if="error && (activeView === 'overview' || activeView === 'vehicles')" class="grid h-full place-items-center">
+      <div v-if="error && activeView === 'vehicles'" class="grid h-full place-items-center">
         <div class="max-w-md rf-glass-strong rounded-3xl p-10 text-center">
           <div class="mx-auto grid h-14 w-14 place-items-center rounded-full bg-red-100 text-2xl font-bold text-red-600">!</div>
           <p class="mt-4 text-lg font-bold text-slate-800">Veri çekilirken bir hata oluştu</p>
@@ -351,74 +349,11 @@ watch(activeView, (view) => {
         </div>
       </div>
 
-      <!-- Genel Bakış -->
-      <template v-if="activeView === 'overview'">
-        <FleetStats />
-        <FleetCharts />
-        <FleetHighlights v-if="auth.isFleetManager" />
+      <!-- Ev -->
+      <OverviewDashboard v-if="activeView === 'overview'" :navigate="nav" />
 
-        <!-- Koyu widget: AI + harita (BandLab Mastering paneli) -->
-        <div v-if="auth.isFleetManager" class="mt-8 grid grid-cols-12 gap-4">
-          <button
-            type="button"
-            class="rf-dark-widget rf-interactive col-span-12 flex flex-col justify-between rounded-3xl p-7 text-left lg:col-span-7 lg:min-h-[200px]"
-            @click="ui.openAiChat()"
-          >
-            <div class="rf-starburst" aria-hidden="true" />
-            <div class="relative z-10 flex items-start gap-4">
-              <span class="rf-icon-ring !bg-white/10 !text-white !border-white/15">
-                <svg class="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.6">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.86 9.86 0 01-4-.8L3 20l1.3-3.2A7.96 7.96 0 013 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                </svg>
-              </span>
-              <div>
-                <h3 class="text-xl font-black text-white">AI Filo Danışmanı</h3>
-                <p class="mt-1 text-sm text-white/60">Risk, bakım ve fiyatlandırma hakkında anında soru sorun.</p>
-              </div>
-            </div>
-            <p class="relative z-10 mt-5 inline-flex w-fit items-center gap-2 rounded-full bg-white px-5 py-2 text-sm font-bold text-slate-900 transition-all duration-300 hover:scale-105">
-              Sohbeti başlat
-              <span aria-hidden="true">→</span>
-            </p>
-          </button>
-
-          <button
-            type="button"
-            class="rf-glass rf-interactive col-span-12 flex flex-col justify-between rounded-3xl p-7 text-left lg:col-span-5 lg:min-h-[200px]"
-            @click="nav('live')"
-          >
-            <div class="flex items-start gap-4">
-              <span class="rf-icon-ring">
-                <svg class="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.6">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-                </svg>
-              </span>
-              <div>
-                <h3 class="text-xl font-black text-slate-900">Canlı Harita</h3>
-                <p class="mt-1 text-sm text-slate-500/80">Araçlarınızı gerçek zamanlı izleyin.</p>
-              </div>
-            </div>
-            <p class="mt-5 text-sm font-bold text-brand-600">Haritayı aç →</p>
-          </button>
-        </div>
-
-        <div class="rf-slant-top relative mt-10 pt-6">
-          <div>
-            <h2 class="text-xl font-black text-slate-900">Son Eklenen Araçlar</h2>
-            <p class="text-sm text-slate-500/80">Filonuzdaki güncel araçlar</p>
-          </div>
-          <button type="button" class="text-sm font-bold text-brand-600 transition-all duration-300 hover:translate-x-0.5" @click="nav('vehicles')">
-            Tümünü gör →
-          </button>
-        </div>
-
-        <div v-if="recentVehicles.length" class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <VehicleCard v-for="vehicle in recentVehicles" :key="vehicle.id" :vehicle="vehicle" @select="openDetail" />
-        </div>
-        <p v-else class="rf-glass mt-4 rounded-3xl p-10 text-center text-slate-500">
-          Görüntülenecek araç bulunamadı.
-        </p>
-      </template>
+      <!-- Ayarlar -->
+      <SettingsPage v-if="activeView === 'settings'" />
 
       <!-- Araçlar -->
       <template v-if="activeView === 'vehicles'">

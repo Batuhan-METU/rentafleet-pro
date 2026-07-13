@@ -22,3 +22,7 @@ openai==2.44.0
 
 # --- Development / seeding ---
 Faker==37.12.0
+
+# --- Testing ---
+pytest==9.1.1
+pytest-django==4.12.0

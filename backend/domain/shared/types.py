@@ -73,4 +73,5 @@ class EvaluateRentalResult:
     risk: EngineResult
     approved: bool
     recommended_vehicle_ids: tuple[int, ...] = ()
+    vehicles: tuple[dict[str, Any], ...] = ()
     quote: dict[str, Any] | None = None

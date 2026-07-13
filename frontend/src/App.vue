@@ -2,7 +2,7 @@
 import { onMounted, ref, computed } from 'vue'
 import { useAuthStore } from './stores/authStore.js'
 import { useBrandingStore } from './stores/brandingStore.js'
-import { syncTenantSlugFromHost } from './utils/tenant.js'
+import { syncCompanySlugFromHost } from './utils/company.js'
 import LoginView from './views/LoginView.vue'
 import Dashboard from './views/Dashboard.vue'
 import AIChatbot from './components/AIChatbot.vue'
@@ -13,7 +13,7 @@ const booting = ref(true)
 
 onMounted(async () => {
   auth.init()
-  syncTenantSlugFromHost()
+  syncCompanySlugFromHost()
   await branding.fetchBranding()
   await auth.bootstrap()
   if (auth.user) branding.applyFromUser(auth.user)

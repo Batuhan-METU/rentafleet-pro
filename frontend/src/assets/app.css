@@ -25,6 +25,7 @@
   body,
   #app {
     height: 100%;
+    width: 100%;
   }
 
   body {
@@ -214,10 +215,12 @@
 
   .rf-section-title {
     @apply text-2xl font-black tracking-tight text-slate-900;
+    line-height: 1.25;
   }
 
   .rf-section-sub {
-    @apply text-sm text-slate-500/90;
+    @apply text-sm text-slate-500;
+    line-height: 1.45;
   }
 
   /* --- BandLab esintili: çapraz kesim --- */
@@ -233,7 +236,8 @@
     position: relative;
   }
 
-  .rf-header-slice::after {
+  /* Yalnızca içerik bölümlerinde kullanılır; üst başlıkta metni keser. */
+  .rf-header-slice--content::after {
     content: "";
     position: absolute;
     left: 0;

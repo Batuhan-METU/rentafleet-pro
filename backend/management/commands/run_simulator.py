@@ -17,6 +17,8 @@ Run with::
     python3 manage.py run_simulator
     python3 manage.py run_simulator --interval 3
     python3 manage.py run_simulator --once          # single tick (testing)
+    python3 manage.py run_simulator --company-id 1  # yalnızca bir kiracı
+    python3 manage.py run_simulator --all-tenants   # tüm kiracılar (ops)
 
 The loop is robust: a failure in one tick is logged and the simulator keeps
 running; Ctrl-C exits cleanly. It holds no growing in-memory state, so it
@@ -36,7 +38,11 @@ from django.db import transaction
 from django.utils import timezone
 
 from backend.infrastructure.clickhouse.client import get_clickhouse_client, suppress_http_warnings
-from backend.models import Vehicle, VehicleLiveState, VehicleStatus
+from backend.apps.vehicles.models import (
+    Vehicle,
+    VehicleLiveState,
+    VehicleStatus,
+)
 
 DEFAULT_INTERVAL_SECONDS = 5
 TELEMETRY_TABLE = "telemetry_logs"
@@ -71,14 +77,43 @@ class Command(BaseCommand):
             action="store_true",
             help="Run a single tick and exit (useful for testing).",
         )
+        parser.add_argument(
+            "--company-id",
+            type=int,
+            default=None,
+            help="Yalnızca belirtilen kiracı (şirket) araçlarını simüle et.",
+        )
+        parser.add_argument(
+            "--all-tenants",
+            action="store_true",
+            help="Tüm kiracıların araçlarını simüle et (platform operasyonu).",
+        )
 
     def handle(self, *args: Any, **options: Any) -> None:
         interval: float = max(0.5, float(options["interval"]))
         run_once: bool = bool(options["once"])
+        company_id: int | None = options.get("company_id")
+        all_tenants: bool = bool(options.get("all_tenants"))
 
+        if company_id is None and not all_tenants:
+            self.stderr.write(
+                self.style.ERROR(
+                    "[SİMÜLATÖR] --company-id veya --all-tenants zorunludur (multi-tenant izolasyon)."
+                )
+            )
+            return
+
+        self._company_id = company_id
+        self._all_tenants = all_tenants
+
+        scope_msg = (
+            f"kiracı #{company_id}"
+            if company_id is not None
+            else "tüm kiracılar"
+        )
         self.stdout.write(
             self.style.SUCCESS(
-                f"[SİMÜLATÖR] Canlı telemetri simülasyonu başladı (her {interval:g} sn). "
+                f"[SİMÜLATÖR] Canlı telemetri simülasyonu başladı ({scope_msg}, her {interval:g} sn). "
                 "Durdurmak için Ctrl-C."
             )
         )
@@ -110,9 +145,10 @@ class Command(BaseCommand):
     # ------------------------------------------------------------------
     def _tick(self) -> int:
         """Advance all active vehicles by one step. Returns the count updated."""
-        vehicles = list(
-            Vehicle.objects.filter(status__in=ACTIVE_STATUSES).select_related("live_state")
-        )
+        vehicle_qs = Vehicle.objects.filter(status__in=ACTIVE_STATUSES)
+        if self._company_id is not None:
+            vehicle_qs = vehicle_qs.filter(company_id=self._company_id)
+        vehicles = list(vehicle_qs.select_related("live_state"))
         if not vehicles:
             return 0
 

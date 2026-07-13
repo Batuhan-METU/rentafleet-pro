@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import apiClient, { setUnauthorizedHandler } from '../services/api.js'
 import { useBrandingStore } from './brandingStore.js'
-import { inferTenantSlug, setTenantSlug } from '../utils/tenant.js'
+import { inferCompanySlug, setCompanySlug } from '../utils/company.js'
 
 const TOKEN_KEY = 'rf_token'
 const USER_KEY = 'rf_user'
@@ -44,7 +44,7 @@ export const useAuthStore = defineStore('auth', {
     _applyUser(user) {
       this.user = user
       this._persist()
-      if (user?.company_name) setTenantSlug(user.company_name)
+      if (user?.company_name) setCompanySlug(user.company_name)
       useBrandingStore().applyFromUser(user)
     },
 
@@ -66,7 +66,7 @@ export const useAuthStore = defineStore('auth', {
     async login(username, password) {
       this.loading = true
       this.error = null
-      setTenantSlug(inferTenantSlug(username))
+      setCompanySlug(inferCompanySlug(username))
 
       try {
         const { data } = await apiClient.post('auth/login/', { username, password })

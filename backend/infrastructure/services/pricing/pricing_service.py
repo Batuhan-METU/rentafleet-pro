@@ -15,7 +15,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from backend.models import Vehicle, VehicleStatus
+from backend.apps.vehicles.models import (
+    Vehicle,
+    VehicleStatus,
+)
 
 # --- Fiyatlandırma parametreleri --------------------------------------
 BASE_PRICE: float = 1500.0
@@ -60,7 +63,9 @@ def calculate_suggested_price(
     :raises Vehicle.DoesNotExist: araç bulunamazsa.
     """
     vehicle = Vehicle.objects.only("id", "current_km", "company_id").get(pk=vehicle_id)
-    scoped_company_id = company_id or vehicle.company_id
+    scoped_company_id = company_id if company_id is not None else vehicle.company_id
+    if scoped_company_id != vehicle.company_id:
+        raise Vehicle.DoesNotExist("Araç belirtilen şirkete ait değil.")
 
     occupancy = _fleet_occupancy_rate(scoped_company_id)
     occupancy_pct = round(occupancy)

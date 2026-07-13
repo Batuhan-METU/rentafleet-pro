@@ -1,0 +1,1 @@
+"""Modüler Django app paketi."""

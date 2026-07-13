@@ -16,7 +16,12 @@ from decimal import Decimal
 from django.db import transaction
 from django.utils import timezone
 
-from backend.models import CompetitorPrice, EnuygunCachedReservation, EnuygunMarketSnapshot, Vehicle
+from backend.apps.enuygun.models import (
+    CompetitorPrice,
+    EnuygunCachedReservation,
+    EnuygunMarketSnapshot,
+)
+from backend.apps.vehicles.models import Vehicle
 from backend.infrastructure.services.common.date_helper import RentalDateWindow, rental_window
 from backend.infrastructure.services.market.enuygun_service import LOCATION_LABEL, EnuygunService
 from backend.infrastructure.services.sipp.segment_matcher import listing_sipp_for_reservation
@@ -71,21 +76,6 @@ def get_snapshot_for_window(window: RentalDateWindow) -> EnuygunMarketSnapshot |
         dropoff_date=window.dropoff_date,
         city=LOCATION_LABEL,
     ).first()
-
-
-def get_todays_snapshot() -> EnuygunMarketSnapshot | None:
-    """Varsayılan kiralama penceresi için snapshot."""
-    return get_snapshot_for_window(rental_window(today=today_snapshot_date()))
-
-
-def window_has_market_data(window: RentalDateWindow) -> bool:
-    snapshot = get_snapshot_for_window(window)
-    if snapshot is not None and snapshot.reservation_count > 0:
-        return True
-    return CompetitorPrice.objects.filter(
-        pickup_date=window.pickup_date,
-        dropoff_date=window.dropoff_date,
-    ).exists()
 
 
 def cached_reservations_for_snapshot(
@@ -197,7 +187,7 @@ def fetch_enuygun_market_snapshot(
 def rebuild_competitor_prices_for_window(
     window: RentalDateWindow,
     *,
-    company_id: int | None = None,
+    company_id: int,
 ) -> dict:
     from backend.infrastructure.services.market.comparable_vehicle_service import rebuild_competitor_prices
 
@@ -213,70 +203,30 @@ def rebuild_competitor_prices_for_window(
     )
 
 
-def rebuild_competitor_prices_for_today() -> dict:
-    return rebuild_competitor_prices_for_window(rental_window(today=today_snapshot_date()))
-
-
-def read_snapshot_meta(window: RentalDateWindow | None = None) -> dict:
-    """Salt okunur snapshot özeti — API tetiklemez."""
-    target = window or rental_window(today=today_snapshot_date())
-    default = rental_window(today=today_snapshot_date())
-    is_default = (
-        target.pickup_date == default.pickup_date
-        and target.dropoff_date == default.dropoff_date
-    )
-    snapshot = get_snapshot_for_window(target)
-    if snapshot is None:
-        return {
-            "snapshot_date": today_snapshot_date().isoformat(),
-            "from_cache": False,
-            "reservation_count": 0,
-            "fetched_at": None,
-            "sehir": LOCATION_LABEL,
-            "alis_tarihi": target.pickup_date.isoformat(),
-            "donus_tarihi": target.dropoff_date.isoformat(),
-            "hedef_baslangic": target.pickup_date.isoformat(),
-            "hedef_bitis": target.dropoff_date.isoformat(),
-            "varsayilan_pencere": is_default,
-            "hatalar": [],
-        }
-    return {
-        "snapshot_date": snapshot.snapshot_date.isoformat(),
-        "from_cache": True,
-        "reservation_count": snapshot.reservation_count,
-        "fetched_at": snapshot.fetched_at.isoformat(),
-        "sehir": snapshot.city,
-        "alis_tarihi": snapshot.pickup_date.isoformat(),
-        "donus_tarihi": snapshot.dropoff_date.isoformat(),
-        "hedef_baslangic": snapshot.pickup_date.isoformat(),
-        "hedef_bitis": snapshot.dropoff_date.isoformat(),
-        "varsayilan_pencere": is_default,
-        "hatalar": [],
-    }
-
-
 def ensure_market_data_for_window(
     window: RentalDateWindow,
     *,
     on_demand: bool = False,
-    company_id: int | None = None,
+    company_id: int,
+    force: bool = False,
 ) -> MarketCacheStatus:
-    """Pencere verisi yoksa yalnızca ``on_demand=True`` iken API çağırır.
-
-    HTTP istek yolunda senkron Enuygun çekimi yapılmaz; yalnızca önbellek okunur.
-    """
+    """Pencere verisi yoksa ``on_demand=True`` iken Enuygun'dan çeker ve CompetitorPrice üretir."""
     snapshot = get_snapshot_for_window(window)
-    if snapshot is not None and snapshot.reservation_count > 0:
-        rebuild_competitor_prices_for_window(window, company_id=company_id)
-        return _status_from_snapshot(snapshot, from_cache=True)
-
-    if CompetitorPrice.objects.filter(
+    has_prices = CompetitorPrice.objects.filter(
         pickup_date=window.pickup_date,
         dropoff_date=window.dropoff_date,
-    ).exists():
-        snapshot = get_snapshot_for_window(window)
-        if snapshot:
+        vehicle__company_id=company_id,
+    ).exists()
+
+    if not force and snapshot is not None and snapshot.reservation_count > 0:
+        # CompetitorPrice bu şirket için zaten üretilmişse her GET'te
+        # sil-yeniden-oluştur yapılmaz; yalnızca eksikse rebuild edilir.
+        if not has_prices:
             rebuild_competitor_prices_for_window(window, company_id=company_id)
+        return _status_from_snapshot(snapshot, from_cache=True)
+
+    if not force and has_prices:
+        if snapshot:
             return _status_from_snapshot(snapshot, from_cache=True)
         return MarketCacheStatus(
             snapshot_date=today_snapshot_date(),
@@ -290,19 +240,22 @@ def ensure_market_data_for_window(
         )
 
     if on_demand:
-        return MarketCacheStatus(
-            snapshot_date=today_snapshot_date(),
-            from_cache=False,
-            reservation_count=0,
-            fetched_at=None,
-            city=LOCATION_LABEL,
-            pickup_date=window.pickup_date.isoformat(),
-            dropoff_date=window.dropoff_date.isoformat(),
-            errors=[
-                "Bu tarih aralığı için piyasa verisi henüz yüklenmedi. "
-                "fetch_competitor_prices komutunu çalıştırın."
-            ],
-        )
+        status = fetch_enuygun_market_snapshot(window=window, force=force)
+        rebuild_competitor_prices_for_window(window, company_id=company_id)
+        snapshot = get_snapshot_for_window(window)
+        if snapshot is not None and snapshot.reservation_count > 0:
+            merged = _status_from_snapshot(snapshot, from_cache=status.from_cache)
+            return MarketCacheStatus(
+                snapshot_date=merged.snapshot_date,
+                from_cache=merged.from_cache,
+                reservation_count=merged.reservation_count,
+                fetched_at=merged.fetched_at,
+                city=merged.city,
+                pickup_date=merged.pickup_date,
+                dropoff_date=merged.dropoff_date,
+                errors=list(status.errors),
+            )
+        return status
 
     return MarketCacheStatus(
         snapshot_date=today_snapshot_date(),

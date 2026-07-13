@@ -7,7 +7,8 @@ from decimal import Decimal
 
 from django.db import transaction
 
-from backend.models import CompetitorPrice, Vehicle
+from backend.apps.enuygun.models import CompetitorPrice
+from backend.apps.vehicles.models import Vehicle
 from backend.infrastructure.services.common.date_helper import RentalDateWindow, rental_window
 from backend.infrastructure.services.market.reservation_filter import MarketSegmentReport, ReservationFilter
 
@@ -56,7 +57,7 @@ def rebuild_competitor_prices(
     reservations: list[dict],
     *,
     window: RentalDateWindow,
-    company_id: int | None = None,
+    company_id: int,
 ) -> dict:
     reservation_filter = ReservationFilter()
     vehicle_count = 0
@@ -64,11 +65,8 @@ def rebuild_competitor_prices(
     per_vehicle: dict[str, dict] = {}
     sync_errors: list[str] = []
 
-    vehicle_qs = Vehicle.objects.all()
-    if company_id is not None:
-        vehicle_qs = vehicle_qs.filter(company_id=company_id)
-
-    for vehicle in vehicle_qs.order_by("plate_number"):
+    vehicle_qs = Vehicle.objects.filter(company_id=company_id).order_by("plate_number")
+    for vehicle in vehicle_qs:
         try:
             report = reservation_filter.build_report(reservations, vehicle)
             row_count += _persist_report(vehicle, report, window=window)
@@ -91,7 +89,7 @@ def sync_fleet_market_prices(
     *,
     force: bool = True,
     window: RentalDateWindow | None = None,
-    company_id: int | None = None,
+    company_id: int,
 ) -> dict:
     from backend.infrastructure.services.market.market_cache_service import (
         fetch_enuygun_market_snapshot,

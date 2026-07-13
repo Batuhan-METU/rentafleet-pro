@@ -4,7 +4,8 @@ Kullanım::
 
     python manage.py fetch_competitor_prices
     python manage.py fetch_competitor_prices --dry-run
-    python manage.py fetch_competitor_prices --start-date 2026-08-01 --end-date 2026-08-05
+    python manage.py fetch_competitor_prices --company-id 1
+    python manage.py fetch_competitor_prices --company-id 1 --start-date 2026-08-01 --end-date 2026-08-05
 """
 
 from __future__ import annotations
@@ -34,6 +35,12 @@ class Command(BaseCommand):
             type=str,
             help="Kiralama bitiş tarihi (YYYY-MM-DD). --start-date ile birlikte kullanın.",
         )
+        parser.add_argument(
+            "--company-id",
+            type=int,
+            required=True,
+            help="Hangi kiracı (şirket) filosu için CompetitorPrice üretileceği.",
+        )
 
     def handle(self, *args, **options) -> None:
         if options["dry_run"]:
@@ -60,8 +67,10 @@ class Command(BaseCommand):
             window = rental_window()
             label = f"varsayılan ({window.pickup_date_iso} → {window.dropoff_date_iso})"
 
-        self.stdout.write(f"Enuygun snapshot senkronu başlıyor — {label} (Ankara)...")
-        result = sync_fleet_market_prices(force=True, window=window)
+        company_id: int = options["company_id"]
+
+        self.stdout.write(f"Enuygun snapshot senkronu başlıyor — {label} (Ankara, kiracı #{company_id})...")
+        result = sync_fleet_market_prices(force=True, window=window, company_id=company_id)
         onbellek = result.get("onbellek") or {}
         kaynak = "önbellek" if onbellek.get("from_cache") else "Enuygun API"
         self.stdout.write(

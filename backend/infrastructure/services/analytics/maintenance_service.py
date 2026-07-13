@@ -19,7 +19,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from backend.infrastructure.clickhouse.client import suppress_http_warnings
-from backend.models import Vehicle
+from backend.apps.vehicles.models import Vehicle
 from backend.infrastructure.services.common.logging_utils import quiet_loggers
 from backend.infrastructure.services.analytics.scoring_service import SAFE_DRIVER_THRESHOLD, score_for_vehicle_driver
 from backend.infrastructure.services.sipp.sipp_service import format_marka_model_sinif
@@ -86,14 +86,12 @@ def _evaluate(vehicle: dict, driver_score: int | None) -> MaintenanceAlert | Non
     )
 
 
-def get_maintenance_alerts(company_id: int | None = None) -> list[MaintenanceAlert]:
+def get_maintenance_alerts(company_id: int) -> list[MaintenanceAlert]:
     """İlgilenilmesi gereken araçların bakım uyarılarını üretir.
 
     En acil (en az kalan km) önce gelecek şekilde sıralanır.
     """
-    vehicle_qs = Vehicle.objects.all()
-    if company_id is not None:
-        vehicle_qs = vehicle_qs.filter(company_id=company_id)
+    vehicle_qs = Vehicle.objects.filter(company_id=company_id)
 
     vehicles = list(
         vehicle_qs.values("id", "plate_number", "brand", "model", "sipp_code", "current_km")

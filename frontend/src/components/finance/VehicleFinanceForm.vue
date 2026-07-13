@@ -50,13 +50,10 @@ const form = reactive({
   transmission: props.editVehicle?.transmission ?? '',
   engine_displacement_cc: props.editVehicle?.engine_displacement_cc ?? '',
   engine_power_hp: props.editVehicle?.engine_power_hp ?? '',
-  segment: props.editVehicle?.segment ?? '',
-  sipp_code: props.editVehicle?.sipp_code ?? '',
   body_type: props.editVehicle?.body_type ?? '',
   color: props.editVehicle?.color ?? '',
   plate_chassis: props.editVehicle?.chassis_number ?? '',
   registration_number: props.editVehicle?.registration_number ?? '',
-  current_km: props.editVehicle?.current_km ?? 0,
   purchase_price: props.editVehicle?.purchase_price ?? props.editProfile?.purchase_price ?? '',
   initial_industrial_expense: props.editVehicle?.initial_industrial_expense ?? '',
   annual_kasko_cost: props.editVehicle?.annual_kasko_cost ?? '',
@@ -89,13 +86,10 @@ function buildPayload() {
     brand: form.brand.trim(),
     model: form.model.trim(),
     production_year: Number(form.production_year),
-    current_km: Number(form.current_km) || 0,
-    package: form.package.trim(),
+    package: form.package.trim() || undefined,
     fuel_type: form.fuel_type,
-    transmission: form.transmission,
-    segment: form.segment.trim(),
-    sipp_code: form.sipp_code.trim().toUpperCase(),
-    body_type: form.body_type,
+    transmission: form.transmission || undefined,
+    body_type: form.body_type || undefined,
     color: form.color.trim(),
     chassis_number: form.plate_chassis.trim(),
     registration_number: form.registration_number.trim(),
@@ -161,8 +155,8 @@ async function submit() {
 
 <template>
   <form class="space-y-6" @submit.prevent="submit">
-    <section class="rf-glass rounded-3xl p-5">
-      <h3 class="mb-1 text-sm font-black text-slate-900">Araç Bilgileri</h3>
+    <section class="rounded-xl border border-slate-200 bg-white p-5">
+      <h3 class="mb-1 text-sm font-semibold text-slate-900">Araç Bilgileri</h3>
       <p class="mb-4 text-xs text-slate-500">Filo künyesi ve teknik özellikler</p>
       <div class="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
         <label class="block">
@@ -199,33 +193,25 @@ async function submit() {
           </select>
         </label>
         <label class="block">
-          <span class="mb-1 block text-xs font-medium text-slate-500">SIPP Kodu</span>
-          <input v-model="form.sipp_code" class="rf-input uppercase" placeholder="ECMR" maxlength="4" />
-        </label>
-        <label class="block">
-          <span class="mb-1 block text-xs font-medium text-slate-500">Segment</span>
-          <input v-model="form.segment" class="rf-input" placeholder="B" />
-        </label>
-        <label class="block">
-          <span class="mb-1 block text-xs font-medium text-slate-500">Kasa Tipi</span>
+          <span class="mb-1 block text-xs font-medium text-slate-500">Kasa tipi</span>
           <select v-model="form.body_type" class="rf-input">
             <option value="">Seçin</option>
             <option v-for="b in BODY_TYPES" :key="b.value" :value="b.value">{{ b.label }}</option>
           </select>
         </label>
         <label class="block">
-          <span class="mb-1 block text-xs font-medium text-slate-500">Güncel Km</span>
-          <input v-model="form.current_km" type="number" class="rf-input" />
-        </label>
-        <label class="block">
           <span class="mb-1 block text-xs font-medium text-slate-500">Renk</span>
           <input v-model="form.color" class="rf-input" placeholder="Beyaz" />
         </label>
       </div>
+      <p class="mt-3 text-xs text-slate-400">
+        SIPP kodu ve segment marka, model, yakıt ve şanzımana göre otomatik belirlenir.
+        Kilometre takip cihazından güncellenir.
+      </p>
     </section>
 
-    <section class="rf-glass rounded-3xl p-5">
-      <h3 class="mb-1 text-sm font-bold text-slate-800">Satın Alma</h3>
+    <section class="rounded-xl border border-slate-200 bg-white p-5">
+      <h3 class="mb-1 text-sm font-semibold text-slate-800">Satın Alma</h3>
       <p class="mb-4 text-xs text-slate-500">
         Ne zaman ve kaça alındı? Satış kararı sistemde biriken gerçek kâra göre verilir — satış planı sormuyoruz.
       </p>
@@ -259,8 +245,8 @@ async function submit() {
       </div>
     </section>
 
-    <section class="rf-glass rounded-3xl p-5 ring-1 ring-emerald-200/40">
-      <h3 class="mb-1 text-sm font-bold text-slate-800">Maliyet Kalemleri</h3>
+    <section class="rounded-xl border border-slate-200 bg-white p-5">
+      <h3 class="mb-1 text-sm font-semibold text-slate-800">Maliyet Kalemleri</h3>
       <p class="mb-4 text-xs text-slate-500">
         Günlük maliyet, başabaş fiyatı ve “şimdi satayım mı?” kararı bu gerçek giderlerden hesaplanır.
       </p>
@@ -306,7 +292,7 @@ async function submit() {
       </div>
     </section>
 
-    <label class="rf-glass block rounded-3xl p-5">
+    <label class="block rounded-xl border border-slate-200 bg-white p-5">
       <span class="mb-1 block text-xs font-medium text-slate-500">Notlar (isteğe bağlı)</span>
       <textarea v-model="form.notes" rows="2" class="rf-input resize-none" placeholder="Ek maliyet veya araç notları…" />
     </label>

@@ -19,7 +19,7 @@ class RiskEngine:
         self,
         rule_engine: RuleEngine | None = None,
         *,
-        company_id: int | None = None,
+        company_id: int,
     ) -> None:
         self._engine = rule_engine or build_risk_engine(company_id)
 

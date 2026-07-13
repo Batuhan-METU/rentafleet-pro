@@ -10,7 +10,7 @@ from backend.domain.eligibility.engine import recommend_vehicles
 from backend.domain.risk.engine import RiskEngine
 from backend.domain.rule_engine.audit import engine_result_to_audit_dict
 from backend.domain.shared.types import CustomerSnapshot, EngineResult
-from backend.models import Driver
+from backend.apps.customer_profiles.models import Driver
 
 
 RISK_LEVEL_LABELS = {
@@ -37,10 +37,11 @@ def evaluate_customer_risk(
     driver: Driver,
     snapshot: CustomerSnapshot,
     *,
-    company_id: int | None = None,
+    company_id: int,
 ) -> RiskEvaluationBundle:
     """Risk motoru + uygunluk + depozito hesabını tek noktada çalıştırır."""
-    engine = RiskEngine(company_id=company_id or driver.company_id)
+    resolved_company_id = company_id or driver.company_id
+    engine = RiskEngine(company_id=resolved_company_id)
     risk_result = engine.evaluate(snapshot)
     audit = engine_result_to_audit_dict(risk_result)
 
@@ -72,7 +73,7 @@ def evaluate_customer_risk(
         audit=audit,
         vehicles=tuple(vehicles),
         deposit=deposit,
-        approved=risk_result.approved and bool(vehicles) if risk_result.approved else False,
+        approved=risk_result.approved and bool(vehicles),
         risk_level_label=RISK_LEVEL_LABELS.get(level, level or "—"),
         factors=factors,
     )
