@@ -13,6 +13,7 @@ onMounted(() => store.fetchMaintenanceAlerts())
 const alerts = computed(() => store.maintenanceAlerts)
 const loading = computed(() => store.maintenanceLoading && !alerts.value.length)
 const criticalCount = computed(() => alerts.value.filter((a) => a.durum === 'ACIL_KIRMIZI').length)
+const healthyCount = computed(() => Math.max(store.vehicles.length - alerts.value.length, 0))
 
 const kmFmt = new Intl.NumberFormat('tr-TR')
 const formatKm = (km) => `${kmFmt.format(km)} km`
@@ -31,14 +32,21 @@ function statusPill(status) {
 <template>
   <div class="space-y-4">
     <!-- Özet şerit -->
-    <div class="flex flex-wrap items-center gap-2">
-      <div class="rf-capsule !py-2">
-        <span class="text-sm text-slate-500/80">Bakım bekleyen:</span>
-        <span class="ml-1 text-sm font-black text-slate-900">{{ alerts.length }}</span>
+    <div class="rf-glass-strong flex flex-wrap items-center gap-2 rounded-3xl p-3">
+      <div class="rounded-2xl bg-emerald-50 px-4 py-2">
+        <p class="text-[10px] font-bold uppercase tracking-wide text-emerald-700/70">Sağlıklı</p>
+        <p class="text-xl font-black leading-tight text-emerald-700">{{ healthyCount }}</p>
       </div>
-      <div class="rf-capsule !py-2" :class="criticalCount ? 'ring-1 ring-red-300/40' : ''">
-        <span class="text-sm text-slate-500/80">Acil:</span>
-        <span class="ml-1 text-sm font-black" :class="criticalCount ? 'text-red-600' : 'text-slate-900'">{{ criticalCount }}</span>
+      <div class="rounded-2xl bg-amber-50 px-4 py-2">
+        <p class="text-[10px] font-bold uppercase tracking-wide text-amber-700/70">Bakım Bekleyen</p>
+        <p class="text-xl font-black leading-tight text-amber-700">{{ alerts.length }}</p>
+      </div>
+      <div class="rounded-2xl px-4 py-2" :class="criticalCount ? 'bg-red-50 ring-1 ring-red-300/50' : 'bg-slate-900/[0.03]'">
+        <p class="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide" :class="criticalCount ? 'text-red-700/80' : 'text-slate-400'">
+          <span v-if="criticalCount" class="h-1.5 w-1.5 rounded-full bg-red-600 animate-pulse" />
+          Acil
+        </p>
+        <p class="text-xl font-black leading-tight" :class="criticalCount ? 'text-red-700' : 'text-slate-900'">{{ criticalCount }}</p>
       </div>
       <button
         type="button"

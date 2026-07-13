@@ -8,6 +8,7 @@ function defaultState() {
     vehicleId: null,
     vehicleLabel: null,
     agreedPrice: null,
+    agreedDailyRate: null,
     pickupDate: null,
     dropoffDate: null,
     driverId: null,
@@ -79,6 +80,7 @@ export const useRentalWorkflowStore = defineStore('rentalWorkflow', {
           vehicleId: this.vehicleId,
           vehicleLabel: this.vehicleLabel,
           agreedPrice: this.agreedPrice,
+          agreedDailyRate: this.agreedDailyRate,
           pickupDate: this.pickupDate,
           dropoffDate: this.dropoffDate,
           driverId: this.driverId,
@@ -104,10 +106,11 @@ export const useRentalWorkflowStore = defineStore('rentalWorkflow', {
     },
 
     /** Müşteri fiyatı kabul etti — tek adımda süreci başlat */
-    acceptPricingOffer({ vehicle, agreedPrice, pickupDate, dropoffDate }) {
+    acceptPricingOffer({ vehicle, agreedPrice, agreedDailyRate = null, pickupDate, dropoffDate }) {
       this.vehicleId = vehicle.id
       this.vehicleLabel = `${vehicle.plate_number} — ${vehicle.brand} ${vehicle.model}`
       this.agreedPrice = agreedPrice
+      this.agreedDailyRate = agreedDailyRate
       this.pickupDate = pickupDate
       this.dropoffDate = dropoffDate
       this.driverId = null
@@ -124,8 +127,9 @@ export const useRentalWorkflowStore = defineStore('rentalWorkflow', {
       this._persist()
     },
 
-    setPricing({ agreedPrice, pickupDate, dropoffDate }) {
+    setPricing({ agreedPrice, agreedDailyRate = null, pickupDate, dropoffDate }) {
       this.agreedPrice = agreedPrice
+      this.agreedDailyRate = agreedDailyRate
       this.pickupDate = pickupDate
       this.dropoffDate = dropoffDate
       this.active = true

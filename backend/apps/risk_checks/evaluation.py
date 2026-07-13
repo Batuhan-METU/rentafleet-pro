@@ -1,4 +1,4 @@
-"""Paylaşılan risk değerlendirme çekirdeği."""
+"""Müşteri risk değerlendirmesi — risk_checks uygulama API'si."""
 
 from __future__ import annotations
 

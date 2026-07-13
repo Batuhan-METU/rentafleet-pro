@@ -56,6 +56,7 @@ class DriverSerializer(serializers.ModelSerializer):
             "is_blacklisted",
             "toplam_kiralama",
             "current_risk_score",
+            "risk_level",
             "risk_note",
             "created_at",
         )

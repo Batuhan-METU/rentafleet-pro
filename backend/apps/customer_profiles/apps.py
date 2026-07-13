@@ -6,3 +6,6 @@ class CustomerProfilesConfig(AppConfig):
     name = "backend.apps.customer_profiles"
     label = "customer_profiles"
     verbose_name = "Müşteri Profilleri"
+
+    def ready(self) -> None:
+        import backend.apps.customer_profiles.signals  # noqa: F401

@@ -35,6 +35,20 @@ def infer_vehicle_tier(vehicle: Vehicle) -> str:
     return VehicleTier.STANDARD
 
 
+def is_vehicle_eligible_for_risk_level(vehicle: Vehicle, risk_level: str) -> bool:
+    """Aracın segmenti, verilen risk seviyesi için izin verilen tier kümesinde mi?"""
+    try:
+        level = RiskLevel(risk_level)
+    except ValueError:
+        return False
+
+    allowed = RISK_TO_ALLOWED_TIERS.get(level, frozenset())
+    if not allowed:
+        return False
+
+    return infer_vehicle_tier(vehicle) in allowed
+
+
 def recommend_vehicles(
     company_id: int,
     risk_level: str,

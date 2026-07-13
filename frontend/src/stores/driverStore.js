@@ -17,11 +17,12 @@ export const useDriverStore = defineStore('driver', {
   },
 
   actions: {
-    async fetchDrivers() {
+    async fetchDrivers({ vehicleId = null } = {}) {
       this.loading = true
       this.error = false
       try {
-        const { data } = await apiClient.get('drivers/')
+        const params = vehicleId ? { vehicle_id: vehicleId } : undefined
+        const { data } = await apiClient.get('drivers/', { params })
         this.drivers = data.surucular ?? []
       } catch {
         this.error = true

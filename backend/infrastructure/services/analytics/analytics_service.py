@@ -15,7 +15,6 @@ susturulur. Tüm hesap tek HTTP isteğinde döner (frontend tarafında N+1 yok).
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass, field
 
 from backend.infrastructure.clickhouse.client import suppress_http_warnings

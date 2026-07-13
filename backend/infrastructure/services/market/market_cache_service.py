@@ -21,7 +21,6 @@ from backend.apps.enuygun.models import (
     EnuygunCachedReservation,
     EnuygunMarketSnapshot,
 )
-from backend.apps.vehicles.models import Vehicle
 from backend.infrastructure.services.common.date_helper import RentalDateWindow, rental_window
 from backend.infrastructure.services.market.enuygun_service import LOCATION_LABEL, EnuygunService
 from backend.infrastructure.services.sipp.segment_matcher import listing_sipp_for_reservation

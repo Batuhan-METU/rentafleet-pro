@@ -8,8 +8,9 @@ from typing import Any
 from django.db import transaction
 
 from backend.application.customer.snapshots import build_customer_snapshot, ensure_customer_profiles
-from backend.application.decision.core import RISK_LEVEL_LABELS, evaluate_customer_risk
+from backend.application.driver.persist_risk import persist_driver_risk_result
 from backend.apps.customer_profiles.models import Driver
+from backend.apps.risk_checks.evaluation import evaluate_customer_risk
 from backend.apps.risk_checks.models import CustomerRiskSnapshot
 
 
@@ -45,14 +46,7 @@ class DriverEvaluationService:
             },
         )
 
-        driver.current_risk_score = bundle.risk_result.score
-        if bundle.risk_result.warnings:
-            driver.risk_note = "; ".join(bundle.risk_result.warnings[:3])
-        elif bundle.risk_result.blockers:
-            driver.risk_note = "; ".join(bundle.risk_result.blockers[:3])
-        else:
-            driver.risk_note = ""
-        driver.save(update_fields=["current_risk_score", "risk_note", "updated_at"])
+        persist_driver_risk_result(driver, bundle)
 
         level = bundle.risk_result.level or ""
         return DriverEvaluationResult(

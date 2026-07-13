@@ -89,3 +89,7 @@ test-results/
 
 # --- Cursor / local tooling ---
 .cursor/
+
+# --- Graphify (local dependency-graph tool output) ---
+graphify-out/
+frontend/graphify-out/

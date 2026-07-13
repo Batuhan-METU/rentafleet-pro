@@ -5,10 +5,10 @@ from django.db import models
 from django.utils.translation import gettext_lazy as _
 
 from backend.apps.customer_profiles.models import Driver
-from backend.apps.reservations.choices import RentalStatus
+from backend.apps.reservations.choices import RentalStatus, ReturnStatus
 from backend.apps.vehicles.models import Vehicle
 
-__all__ = ["Rental", "RentalStatus"]
+__all__ = ["Rental", "RentalStatus", "ReturnStatus"]
 
 
 class Rental(models.Model):
@@ -38,7 +38,21 @@ class Rental(models.Model):
         db_index=True,
     )
     started_at = models.DateTimeField(_("started at"))
-    ended_at = models.DateTimeField(_("ended at"), null=True, blank=True)
+    ended_at = models.DateTimeField(
+        _("ended at"),
+        null=True,
+        blank=True,
+        help_text=_("Güncel planlanan dönüş tarihi; uzatma yapılırsa ileri taşınır."),
+    )
+    original_ended_at = models.DateTimeField(
+        _("original ended at"),
+        null=True,
+        blank=True,
+        help_text=_(
+            "Oluşturmada belirlenen ilk sözleşme dönüş tarihi — uzatmayla asla "
+            "değişmez; erken/geç/zamanında sınıflandırması buna göre yapılır."
+        ),
+    )
     start_km: int = models.PositiveIntegerField(_("start km"), default=0)
     end_km = models.PositiveIntegerField(_("end km"), null=True, blank=True)
     application = models.ForeignKey(
@@ -62,6 +76,35 @@ class Rental(models.Model):
         decimal_places=2,
         null=True,
         blank=True,
+    )
+    daily_rate = models.DecimalField(
+        _("daily rate"),
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text=_("Anlaşılan günlük kiralama bedeli — tüm fiyat farkı hesaplarının tek kaynağı."),
+    )
+    actual_return_at = models.DateTimeField(
+        _("actual return at"),
+        null=True,
+        blank=True,
+        help_text=_("Aracın fiilen teslim alındığı an; ended_at sözleşme tarihidir."),
+    )
+    price_difference = models.DecimalField(
+        _("price difference"),
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text=_("Pozitif = ek tahsilat (geç teslim), negatif = iade (erken teslim)."),
+    )
+    return_status = models.CharField(
+        _("return status"),
+        max_length=16,
+        choices=ReturnStatus.choices,
+        blank=True,
+        default="",
     )
     created_at = models.DateTimeField(_("created at"), auto_now_add=True)
 

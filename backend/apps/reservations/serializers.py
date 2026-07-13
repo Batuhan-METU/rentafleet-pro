@@ -28,10 +28,18 @@ def rental_donem_kodu(rental: Rental, *, now=None) -> str:
     if rental.status == RentalStatus.ACTIVE:
         if rental.started_at > now:
             return "GELECEK"
-        if rental.ended_at and rental.ended_at < now:
-            return "GECMIS"
         return "AKTIF"
     return "GECMIS"
+
+
+class RentalReturnSerializer(serializers.Serializer):
+    actual_return_at = serializers.DateTimeField()
+    notes = serializers.CharField(required=False, allow_blank=True, default="")
+    preview = serializers.BooleanField(required=False, default=False)
+
+
+class RentalExtendSerializer(serializers.Serializer):
+    new_ended_at = serializers.DateTimeField()
 
 
 class RentalCreateSerializer(serializers.Serializer):
@@ -39,7 +47,7 @@ class RentalCreateSerializer(serializers.Serializer):
     vehicle_id = serializers.IntegerField()
     pickup_date = serializers.DateField(help_text="Alış tarihi (YYYY-MM-DD)")
     dropoff_date = serializers.DateField(help_text="Bırakış tarihi (YYYY-MM-DD)")
-    quoted_total = serializers.DecimalField(
+    daily_rate = serializers.DecimalField(
         max_digits=12, decimal_places=2, required=False, allow_null=True
     )
     deposit_amount = serializers.DecimalField(
@@ -77,10 +85,15 @@ class RentalSerializer(serializers.ModelSerializer):
             "donem_label",
             "started_at",
             "ended_at",
+            "original_ended_at",
             "start_km",
             "end_km",
             "quoted_total",
+            "daily_rate",
             "deposit_amount",
+            "actual_return_at",
+            "return_status",
+            "price_difference",
             "created_at",
         )
         read_only_fields = fields

@@ -32,10 +32,28 @@ async function loginAsDemo(account) {
 
 <template>
   <div class="rf-ambient grid min-h-screen lg:grid-cols-2">
-    <!-- Sol: koyu hero panel (BandLab split) -->
+    <!-- Sol: koyu hero panel — canlı takip temalı rota çizgisi imza öğesi -->
     <div class="rf-login-hero">
-      <div class="rf-login-burst" aria-hidden="true" />
+      <div class="rf-login-mapgrid" aria-hidden="true" />
+      <svg class="rf-route-svg" viewBox="0 0 180 520" preserveAspectRatio="none" aria-hidden="true">
+        <path
+          id="rfRoutePath"
+          class="rf-route-path"
+          d="M 190 500 C 130 460, 160 400, 100 360 S 40 280, 110 220 S 150 120, 60 40"
+        />
+        <circle cx="190" cy="500" r="4" class="rf-route-stop" />
+        <circle cx="100" cy="360" r="4" class="rf-route-stop" />
+        <circle cx="110" cy="220" r="4" class="rf-route-stop" />
+        <circle cx="60" cy="40" r="5" class="rf-route-stop" />
+        <circle r="5" class="rf-route-dot">
+          <animateMotion dur="7s" repeatCount="indefinite" rotate="auto">
+            <mpath href="#rfRoutePath" />
+          </animateMotion>
+        </circle>
+      </svg>
+
       <div class="relative z-10 max-w-md">
+        <p class="mb-5 text-xs font-bold uppercase tracking-[0.2em] text-white/50">Kurumsal Filo Yönetimi</p>
         <img
           v-if="branding.logo_url"
           :src="branding.logo_url"
@@ -49,13 +67,19 @@ async function loginAsDemo(account) {
         >
           {{ branding.logoInitials }}
         </div>
-        <h1 class="text-4xl font-black leading-tight tracking-tight">
+        <h1 class="font-display text-5xl font-black leading-[1.05] tracking-tight">
           {{ branding.display_name }}
         </h1>
-        <p class="mt-4 text-base leading-relaxed text-white/70">
+        <p class="mt-4 max-w-sm text-base leading-relaxed text-white/70">
           Her filo için tasarlanmış akıllı yönetim platformu. Araçlarınızı izleyin, fiyatlayın ve kararlarınızı veriye dayandırın.
         </p>
-        <div class="rf-trust-strip mt-10 !justify-start !bg-white/10 !border-white/15">
+
+        <div class="rf-login-readout mt-8">
+          <span class="rf-login-readout-dot" aria-hidden="true" />
+          <span class="text-xs font-bold uppercase tracking-wider text-white/80">Canlı konum takibi aktif</span>
+        </div>
+
+        <div class="rf-trust-strip mt-6 !justify-start !bg-white/10 !border-white/15">
           <span v-for="item in trustItems" :key="item" class="rf-trust-item !text-white/50">
             {{ item }}
           </span>
@@ -71,7 +95,8 @@ async function loginAsDemo(account) {
       </div>
 
       <form class="rf-glass-strong w-full max-w-md rounded-3xl p-8 shadow-2xl" @submit.prevent="submit">
-        <h2 class="text-2xl font-black tracking-tight text-slate-900">Giriş Yap</h2>
+        <p class="mb-1.5 text-xs font-bold uppercase tracking-[0.2em] text-brand-600/80">Hoş geldiniz</p>
+        <h2 class="font-display text-2xl font-black tracking-tight text-slate-900">Giriş Yap</h2>
         <p class="mt-1 text-sm text-slate-500/80">Demo için aşağıdaki butonlardan birine tıklayın.</p>
 
         <div class="mt-6 space-y-4">

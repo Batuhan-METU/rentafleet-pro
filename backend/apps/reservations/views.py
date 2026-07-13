@@ -24,10 +24,11 @@ from backend.application.customer.profiles import apply_customer_profiles
 from backend.application.customer.snapshots import ensure_customer_profiles
 from backend.application.customer.rental_stats import sync_rental_history_stats
 from backend.application.rental.evaluate_application import RentalApplicationService
+from backend.application.rental.reservation_guard import enforce_risk_and_eligibility
+from backend.application.rental.return_processing import extend_active_rental, process_vehicle_return
 from backend.apps.customer_profiles.models import Driver
 from backend.apps.risk_checks.models import (
     RentalApplication,
-    RentalDecisionLog,
 )
 from backend.apps.reservations.models import (
     Rental,
@@ -43,8 +44,9 @@ from backend.apps.risk_checks.serializers import (
 )
 from backend.apps.reservations.serializers import (
     RentalCreateSerializer,
+    RentalExtendSerializer,
+    RentalReturnSerializer,
     RentalSerializer,
-    rental_donem_kodu,
 )
 
 
@@ -67,16 +69,11 @@ def _donem_filter_q(donem: str, *, now) -> Q | None:
     if donem == "IPTAL":
         return Q(status=RentalStatus.CANCELLED)
     if donem == "GECMIS":
-        return Q(status=RentalStatus.COMPLETED) | Q(
-            status=RentalStatus.ACTIVE, ended_at__lt=now
-        )
+        return Q(status=RentalStatus.COMPLETED)
     if donem == "GELECEK":
         return Q(status=RentalStatus.ACTIVE, started_at__gt=now)
     if donem == "AKTIF":
-        return Q(
-            status=RentalStatus.ACTIVE,
-            started_at__lte=now,
-        ) & (Q(ended_at__isnull=True) | Q(ended_at__gte=now))
+        return Q(status=RentalStatus.ACTIVE, started_at__lte=now)
     return None
 
 
@@ -113,7 +110,6 @@ class RentalListCreateView(APIView):
             }
         )
 
-    @transaction.atomic
     def post(self, request: Request) -> Response:
         company = require_user_company(request)
 
@@ -124,16 +120,17 @@ class RentalListCreateView(APIView):
         driver = get_scoped_driver(request, data["driver_id"])
         vehicle = get_scoped_vehicle(request, data["vehicle_id"])
 
-        if driver.is_blacklisted:
-            return Response(
-                {"error": "Kara listedeki sürücüye kiralama yapılamaz."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
+        # Kara liste dahil tüm risk engelleri aşağıdaki risk kapısında
+        # (BLACKLIST kuralı) değerlendirilir; burada erken kontrol yapılmaz ki
+        # engellenen deneme RentalDecisionLog'a düşsün.
         started_at = _datetime_at(data["pickup_date"])
         ended_at = _datetime_at(data["dropoff_date"])
         now = timezone.now()
         is_future = started_at > now
+
+        daily_rate = data.get("daily_rate")
+        total_days = max((data["dropoff_date"] - data["pickup_date"]).days, 1)
+        quoted_total = daily_rate * total_days if daily_rate is not None else None
 
         if driver.rentals.filter(
             status=RentalStatus.ACTIVE,
@@ -161,31 +158,62 @@ class RentalListCreateView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        rental = Rental.objects.create(
+        # Risk + araç uygunluk kapısı: taze bir risk değerlendirmesi çalıştırır,
+        # RentalDecisionLog'a yazar ve seçilen aracın sürücünün risk seviyesine
+        # uygun segmentte olduğunu doğrular. Başarısızsa ValidationError fırlatır
+        # (DRF dispatch bunu otomatik olarak 400 yanıtına çevirir).
+        #
+        # Bilerek DIŞARIDA çalıştırılır: enforce_risk_and_eligibility kendi
+        # atomic bloklarını kullanır (RentalApplicationService), böylece
+        # reddedilen bir denemenin RentalDecisionLog kaydı, aşağıdaki
+        # rezervasyon oluşturma bloğu hiç çalışmasa bile kalıcı olur. Eğer bu
+        # çağrı tüm post() tek bir @transaction.atomic içinde olsaydı,
+        # fırlatılan ValidationError audit kayıtlarını da geri alırdı.
+        application = enforce_risk_and_eligibility(
+            company=company,
             driver=driver,
             vehicle=vehicle,
-            status=RentalStatus.ACTIVE,
-            started_at=started_at,
-            ended_at=ended_at,
-            start_km=vehicle.current_km,
-            quoted_total=data.get("quoted_total"),
-            deposit_amount=data.get("deposit_amount"),
+            created_by=request.user,
+            requested_pickup_at=started_at,
+            requested_return_at=ended_at,
         )
 
-        if not is_future:
-            vehicle.status = VehicleStatus.RENTED
-            vehicle.save(update_fields=["status"])
+        with transaction.atomic():
+            rental = Rental.objects.create(
+                driver=driver,
+                vehicle=vehicle,
+                status=RentalStatus.ACTIVE,
+                started_at=started_at,
+                ended_at=ended_at,
+                original_ended_at=ended_at,
+                start_km=vehicle.current_km,
+                quoted_total=quoted_total,
+                daily_rate=daily_rate,
+                deposit_amount=data.get("deposit_amount"),
+                application=application,
+            )
 
-        sync_rental_history_stats(driver)
+            if not is_future:
+                vehicle.status = VehicleStatus.RENTED
+                vehicle.save(update_fields=["status"])
+
+            sync_rental_history_stats(driver)
+
         return Response(RentalSerializer(rental).data, status=status.HTTP_201_CREATED)
 
 
 class RentalCancelView(APIView):
-    """POST /api/rentals/<pk>/cancel/ — aktif veya gelecek rezervasyonu iptal et."""
+    """POST /api/rentals/<pk>/cancel/ — gelecek rezervasyonu iptal et veya aktif
+    rezervasyonu erken teslim olarak kapat.
+
+    Araç henüz teslim alınmadıysa (rezervasyon Gelecek): fiyat farkı olmadan
+    doğrudan iptal edilir, araç hemen boşa düşer. Rezervasyon zaten
+    başlamışsa (Aktif): iptal etmek fiilen "erken teslim" anlamına gelir —
+    fark hesaplanıp tahsil/iade edilir, kayıt CANCELLED değil COMPLETED olur.
+    """
 
     permission_classes = (IsFleetStaff,)
 
-    @transaction.atomic
     def post(self, request: Request, pk: int) -> Response:
         rental = get_scoped_rental(request, pk)
         if rental.status != RentalStatus.ACTIVE:
@@ -195,18 +223,86 @@ class RentalCancelView(APIView):
             )
 
         now = timezone.now()
-        was_in_progress = rental.started_at <= now < rental.ended_at
+        if rental.started_at > now:
+            with transaction.atomic():
+                rental.status = RentalStatus.CANCELLED
+                rental.save(update_fields=["status"])
+                sync_rental_history_stats(rental.driver)
+            return Response(RentalSerializer(rental).data)
 
-        rental.status = RentalStatus.CANCELLED
-        rental.save(update_fields=["status"])
+        settlement = process_vehicle_return(rental, now)
+        rental.refresh_from_db()
+        return Response(
+            {
+                "durum": settlement.return_status,
+                "kullanilmayan_gun": settlement.unused_days,
+                "rotar_saat": settlement.overage_hours,
+                "gunluk_ucret": str(settlement.daily_rate),
+                "fark_tutari": str(settlement.price_difference),
+                "mesaj": settlement.message,
+                "kiralama": RentalSerializer(rental).data,
+            }
+        )
 
-        if was_in_progress:
-            vehicle = rental.vehicle
-            if vehicle.status == VehicleStatus.RENTED:
-                vehicle.status = VehicleStatus.AVAILABLE
-                vehicle.save(update_fields=["status"])
 
-        sync_rental_history_stats(rental.driver)
+class RentalReturnView(APIView):
+    """POST /api/rentals/<pk>/return/ — araç teslim al (erken/geç/zamanında).
+
+    ``preview: true`` gönderilirse hiçbir kayıt değişmez; yalnızca fark
+    hesaplanıp önizleme olarak döner (modal'daki canlı gösterge için).
+    """
+
+    permission_classes = (IsFleetStaff,)
+
+    def post(self, request: Request, pk: int) -> Response:
+        rental = get_scoped_rental(request, pk)
+        if rental.status != RentalStatus.ACTIVE:
+            return Response(
+                {"error": "Yalnızca aktif rezervasyonlar teslim alınabilir."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = RentalReturnSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        settlement = process_vehicle_return(
+            rental,
+            data["actual_return_at"],
+            data.get("notes", ""),
+            preview=data.get("preview", False),
+        )
+
+        payload = {
+            "onizleme": data.get("preview", False),
+            "durum": settlement.return_status,
+            "kullanilmayan_gun": settlement.unused_days,
+            "rotar_saat": settlement.overage_hours,
+            "gunluk_ucret": str(settlement.daily_rate),
+            "fark_tutari": str(settlement.price_difference),
+            "mesaj": settlement.message,
+        }
+        if not data.get("preview", False):
+            rental.refresh_from_db()
+            payload["kiralama"] = RentalSerializer(rental).data
+
+        return Response(payload)
+
+
+class RentalExtendView(APIView):
+    """POST /api/rentals/<pk>/extend/ — aktif kiralamanın dönüş tarihini ileri ötele.
+
+    Aracın yeni tarih aralığında başka bir aktif rezervasyonu varsa 400 döner.
+    """
+
+    permission_classes = (IsFleetStaff,)
+
+    def post(self, request: Request, pk: int) -> Response:
+        rental = get_scoped_rental(request, pk)
+        serializer = RentalExtendSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        extend_active_rental(rental, serializer.validated_data["new_ended_at"])
         return Response(RentalSerializer(rental).data)
 
 

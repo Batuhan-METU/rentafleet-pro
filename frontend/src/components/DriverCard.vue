@@ -24,9 +24,31 @@ const riskBadgeClass = computed(() => {
 
 const rental = computed(() => props.driver.aktif_kiralama)
 const canQuickReserve = computed(() =>
-  readyForDriverPick.value && !rental.value && !props.driver.is_blacklisted,
+  readyForDriverPick.value
+  && !rental.value
+  && !props.driver.is_blacklisted
+  && props.driver.risk_onaylandi !== false
+  && (props.driver.araca_uygun !== false),
 )
 const kmFmt = new Intl.NumberFormat('tr-TR')
+
+const initials = computed(() => {
+  const name = props.driver.ad_soyad || ''
+  return name
+    .split(' ')
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toLocaleUpperCase('tr'))
+    .join('')
+})
+
+const avatarClass = computed(() => {
+  const value = riskScore.value
+  if (value === null) return 'bg-slate-200 text-slate-500'
+  if (value <= 30) return 'bg-emerald-500/15 text-emerald-700'
+  if (value <= 60) return 'bg-amber-500/15 text-amber-700'
+  return 'bg-red-500/15 text-red-700'
+})
 </script>
 
 <template>
@@ -39,12 +61,17 @@ const kmFmt = new Intl.NumberFormat('tr-TR')
     @keydown.space.prevent="emit('select', driver)"
   >
     <div class="flex items-start justify-between gap-3">
-      <div>
-        <h3 class="text-xl font-black tracking-tight text-slate-900">{{ driver.ad_soyad }}</h3>
-        <p class="mt-0.5 text-sm text-slate-500/80">{{ driver.yas }} yaş · {{ driver.cinsiyet }}</p>
+      <div class="flex min-w-0 items-center gap-3">
+        <div class="grid h-11 w-11 shrink-0 place-items-center rounded-2xl text-sm font-black" :class="avatarClass">
+          {{ initials || '—' }}
+        </div>
+        <div class="min-w-0">
+          <h3 class="truncate text-xl font-black tracking-tight text-slate-900">{{ driver.ad_soyad }}</h3>
+          <p class="mt-0.5 text-sm text-slate-500/80">{{ driver.yas }} yaş · {{ driver.cinsiyet }}</p>
+        </div>
       </div>
       <span
-        class="inline-flex flex-col items-center rounded-full px-3 py-1 text-xs font-black ring-1 backdrop-blur-sm"
+        class="inline-flex shrink-0 flex-col items-center rounded-full px-3 py-1 text-xs font-black ring-1 backdrop-blur-sm"
         :class="riskBadgeClass"
         title="Risk Skoru"
       >
@@ -87,7 +114,7 @@ const kmFmt = new Intl.NumberFormat('tr-TR')
     >
       <p class="text-[10px] font-bold uppercase tracking-widest text-brand-600">Aktif Kiralama</p>
       <p class="mt-1 font-black text-slate-900">{{ rental.plaka }}</p>
-      <p class="text-sm text-slate-600/90">{{ rental.marka_model_sinif || rental.marka_model }}</p>
+      <p class="text-sm text-slate-600/90">{{ rental.marka_model }}</p>
       <p class="text-xs text-slate-500/80">{{ kmFmt.format(rental.guncel_km) }} km</p>
     </div>
     <div v-else class="mt-4 rounded-2xl border border-dashed border-white/40 px-3 py-2.5 text-center text-xs text-slate-400">

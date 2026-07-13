@@ -8,6 +8,8 @@ import { useDriverStore } from '../stores/driverStore.js'
 import { useUiStore } from '../stores/uiStore.js'
 import { useAuthStore } from '../stores/authStore.js'
 import RentalWorkflowProgress from './RentalWorkflowProgress.vue'
+import ReturnVehicleModal from './ReturnVehicleModal.vue'
+import ExtendRentalModal from './ExtendRentalModal.vue'
 import { formatTL } from '../utils/format.js'
 
 const rentalStore = useRentalStore()
@@ -19,6 +21,7 @@ const ui = useUiStore()
 const auth = useAuthStore()
 
 const listTab = ref('AKTIF')
+const historyFilter = ref('TUMU')
 const showManualForm = ref(false)
 const formError = ref('')
 const successMessage = ref('')
@@ -26,8 +29,32 @@ const successMessage = ref('')
 const tabs = [
   { id: 'AKTIF', label: 'Aktif', countKey: 'aktif' },
   { id: 'GELECEK', label: 'Gelecek', countKey: 'gelecek' },
-  { id: 'GECMIS', label: 'Geçmiş', countKey: 'gecmis' },
+  { id: 'GECMIS', label: 'Geçmiş Rezervasyonlar', countKey: 'gecmis' },
 ]
+
+function tabCount(tab) {
+  return rentalStore.summary[tab.countKey] ?? 0
+}
+
+// "Geçmiş Rezervasyonlar" seçiliyken gösterilen alt kategori: hepsi ya da
+// zamanında / erken teslim alınan / geç teslim alınan üçlü ayrımı.
+const historyFilters = [
+  { id: 'TUMU', label: 'Tümü' },
+  { id: 'ON_TIME', label: 'Zamanında' },
+  { id: 'EARLY', label: 'Erken Teslim Alınan' },
+  { id: 'LATE', label: 'Geç Teslim Alınan' },
+]
+
+function historyFilterCount(filter) {
+  if (filter.id === 'ON_TIME') return rentalStore.onTimeRentals.length
+  if (filter.id === 'EARLY') return rentalStore.earlyReturnedRentals.length
+  if (filter.id === 'LATE') return rentalStore.lateReturnedRentals.length
+  return rentalStore.pastRentals.length
+}
+
+watch(listTab, (v) => {
+  if (v !== 'GECMIS') historyFilter.value = 'TUMU'
+})
 
 const dateFormatter = new Intl.DateTimeFormat('tr-TR', {
   day: 'numeric',
@@ -59,6 +86,9 @@ const availableVehicles = computed(() =>
 const listedRentals = computed(() => {
   if (listTab.value === 'AKTIF') return rentalStore.activeRentals
   if (listTab.value === 'GELECEK') return rentalStore.upcomingRentals
+  if (historyFilter.value === 'ON_TIME') return rentalStore.onTimeRentals
+  if (historyFilter.value === 'EARLY') return rentalStore.earlyReturnedRentals
+  if (historyFilter.value === 'LATE') return rentalStore.lateReturnedRentals
   return rentalStore.pastRentals
 })
 
@@ -68,23 +98,41 @@ function parsePrice(raw) {
   return Number.isNaN(n) || n <= 0 ? null : n
 }
 
+function daysBetween(pickup, dropoff) {
+  if (!pickup || !dropoff) return null
+  const diff = (new Date(dropoff) - new Date(pickup)) / (1000 * 60 * 60 * 24)
+  return diff > 0 ? Math.round(diff) : null
+}
+
 function emptyForm() {
   return {
     driverId: '',
     vehicleId: '',
     pickupDate: addDays(new Date(), 1),
     dropoffDate: addDays(new Date(), 4),
-    quotedTotal: '',
+    dailyRate: '',
   }
 }
 
 const workflowForm = ref({
   pickupDate: '',
   dropoffDate: '',
-  quotedTotal: '',
+  dailyRate: '',
 })
 
 const manualForm = ref(emptyForm())
+
+const workflowFormTotal = computed(() => {
+  const rate = parsePrice(workflowForm.value.dailyRate)
+  const days = daysBetween(workflowForm.value.pickupDate, workflowForm.value.dropoffDate)
+  return rate && days ? rate * days : null
+})
+
+const manualFormTotal = computed(() => {
+  const rate = parsePrice(manualForm.value.dailyRate)
+  const days = daysBetween(manualForm.value.pickupDate, manualForm.value.dropoffDate)
+  return rate && days ? rate * days : null
+})
 
 watch(
   () => workflow.pickupDate,
@@ -113,11 +161,11 @@ watch(
 )
 
 watch(
-  () => workflow.agreedPrice,
+  () => workflow.agreedDailyRate,
   (v) => {
     if (v != null) {
-      workflowForm.value.quotedTotal = String(v)
-      manualForm.value.quotedTotal = String(v)
+      workflowForm.value.dailyRate = String(v)
+      manualForm.value.dailyRate = String(v)
     }
   },
   { immediate: true },
@@ -162,7 +210,7 @@ async function createReservation(payload, { clearWorkflow = false } = {}) {
       vehicle_id: Number(payload.vehicle_id),
       pickup_date: payload.pickup_date,
       dropoff_date: payload.dropoff_date,
-      quoted_total: payload.quoted_total ?? null,
+      daily_rate: payload.daily_rate ?? null,
       deposit_amount: payload.deposit_amount ?? null,
     })
     successMessage.value = 'Rezervasyon oluşturuldu. Araç sürücüye atandı.'
@@ -184,7 +232,7 @@ async function submitWorkflowReservation() {
     vehicle_id: workflow.vehicleId,
     pickup_date: workflowForm.value.pickupDate,
     dropoff_date: workflowForm.value.dropoffDate,
-    quoted_total: parsePrice(workflowForm.value.quotedTotal) ?? workflow.agreedPrice,
+    daily_rate: parsePrice(workflowForm.value.dailyRate) ?? workflow.agreedDailyRate,
     deposit_amount: workflow.depositAmount,
   }, { clearWorkflow: true })
 }
@@ -195,7 +243,7 @@ async function submitManualReservation() {
     vehicle_id: manualForm.value.vehicleId,
     pickup_date: manualForm.value.pickupDate,
     dropoff_date: manualForm.value.dropoffDate,
-    quoted_total: parsePrice(manualForm.value.quotedTotal),
+    daily_rate: parsePrice(manualForm.value.dailyRate),
   })
 }
 
@@ -217,13 +265,79 @@ async function cancelReservation(rental) {
 }
 
 function canCancelRental(rental) {
-  return rental.donem_kodu === 'AKTIF' || rental.donem_kodu === 'GELECEK'
+  // Aktif rezervasyonlarda ayrı bir İptal yok — "Teslim Al" zaten erken teslim
+  // anlamına gelir. Yalnızca henüz başlamamış (Gelecek) rezervasyonlar iptal edilir.
+  return rental.donem_kodu === 'GELECEK'
+}
+
+function canReturnRental(rental) {
+  // donem_kodu'na değil ham status'a bakılır: sözleşme bitiş saati geçmiş
+  // ama henüz kapatılmamış (geç teslimat) rezervasyonlar "Geçmiş" sekmesinde
+  // görünür ama backend'de hâlâ ACTIVE'tir — Teslim Al/Uzat orada da çıkmalı.
+  // Ama henüz BAŞLAMAMIŞ (Gelecek) bir rezervasyon — status yine ACTIVE'tir —
+  // teslim alınamaz veya uzatılamaz; bu yüzden started_at de kontrol edilir.
+  return rental.status === 'ACTIVE' && new Date(rental.started_at) <= new Date()
+}
+
+const returnTarget = ref(null)
+
+function openReturnModal(rental) {
+  returnTarget.value = rental
+}
+
+function closeReturnModal() {
+  returnTarget.value = null
+}
+
+async function onVehicleReturned() {
+  successMessage.value = 'Araç teslim alındı.'
+  await vehicleStore.fetchVehicles()
+  await driverStore.fetchDrivers()
+  await rentalStore.fetchRentals()
+}
+
+const extendTarget = ref(null)
+
+function openExtendModal(rental) {
+  extendTarget.value = rental
+}
+
+function closeExtendModal() {
+  extendTarget.value = null
+}
+
+async function onRentalExtended() {
+  successMessage.value = 'Rezervasyon uzatıldı.'
+  await rentalStore.fetchRentals()
 }
 
 function donemBadgeClass(kod) {
   if (kod === 'AKTIF') return 'bg-emerald-100 text-emerald-700'
   if (kod === 'GELECEK') return 'bg-sky-100 text-sky-700'
   return 'bg-slate-100 text-slate-600'
+}
+
+function initialsFor(name) {
+  return (name || '')
+    .split(' ')
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toLocaleUpperCase('tr'))
+    .join('')
+}
+
+function priceDiffClass(rental) {
+  const diff = Number(rental.price_difference)
+  if (!diff) return 'text-slate-400'
+  return diff < 0 ? 'text-emerald-600' : 'text-rose-600'
+}
+
+function formatPriceDiff(rental) {
+  if (rental.price_difference == null) return '—'
+  const diff = Number(rental.price_difference)
+  if (diff === 0) return '₺0'
+  const sign = diff < 0 ? '−' : '+'
+  return `${sign}${formatTL(Math.abs(diff), { decimals: true })}`
 }
 
 onMounted(async () => {
@@ -291,8 +405,11 @@ onMounted(async () => {
           <input v-model="workflowForm.dropoffDate" type="date" :min="workflowForm.pickupDate || minPickup" class="rf-input mt-1" />
         </div>
         <div>
-          <label class="text-xs font-medium text-slate-500">Toplam Fiyat (₺)</label>
-          <input v-model="workflowForm.quotedTotal" type="text" class="rf-input mt-1" />
+          <label class="text-xs font-medium text-slate-500">Günlük Fiyat (₺)</label>
+          <input v-model="workflowForm.dailyRate" type="text" class="rf-input mt-1" />
+          <p v-if="workflowFormTotal != null" class="mt-1 text-xs text-slate-500">
+            = {{ formatTL(workflowFormTotal, { decimals: true }) }} toplam
+          </p>
         </div>
       </div>
 
@@ -347,8 +464,11 @@ onMounted(async () => {
             <input v-model="manualForm.dropoffDate" type="date" :min="manualForm.pickupDate || minPickup" class="rf-input mt-1" />
           </div>
           <div class="sm:col-span-2">
-            <label class="text-xs font-medium text-slate-500">Toplam Fiyat (₺)</label>
-            <input v-model="manualForm.quotedTotal" type="text" class="rf-input mt-1" placeholder="Opsiyonel" />
+            <label class="text-xs font-medium text-slate-500">Günlük Fiyat (₺)</label>
+            <input v-model="manualForm.dailyRate" type="text" class="rf-input mt-1" placeholder="Opsiyonel" />
+            <p v-if="manualFormTotal != null" class="mt-1 text-xs text-slate-500">
+              = {{ formatTL(manualFormTotal, { decimals: true }) }} toplam
+            </p>
           </div>
         </div>
         <button
@@ -385,7 +505,22 @@ onMounted(async () => {
           @click="listTab = tab.id"
         >
           {{ tab.label }}
-          <span class="ml-1 opacity-70">({{ rentalStore.summary[tab.countKey] ?? 0 }})</span>
+          <span class="ml-1 opacity-70">({{ tabCount(tab) }})</span>
+        </button>
+      </div>
+
+      <!-- Geçmiş Rezervasyonlar seçiliyken: zamanında / erken / geç alt-filtresi -->
+      <div v-if="listTab === 'GECMIS'" class="mt-3 flex flex-wrap items-center gap-2 border-l-2 border-slate-200 pl-3">
+        <button
+          v-for="filter in historyFilters"
+          :key="filter.id"
+          type="button"
+          class="rf-pill-filter !px-3 !py-1.5 !text-xs"
+          :class="historyFilter === filter.id ? 'rf-pill-filter--active' : 'rf-pill-filter--idle'"
+          @click="historyFilter = filter.id"
+        >
+          {{ filter.label }}
+          <span class="ml-1 opacity-70">({{ historyFilterCount(filter) }})</span>
         </button>
       </div>
 
@@ -394,7 +529,7 @@ onMounted(async () => {
       </div>
       <p v-else-if="rentalStore.error" class="py-8 text-center text-red-600">Liste yüklenemedi.</p>
       <div v-else-if="listedRentals.length" class="mt-4 overflow-x-auto">
-        <table class="w-full min-w-[640px] text-left text-sm">
+        <table class="w-full min-w-[720px] text-left text-sm">
           <thead>
             <tr class="border-b border-slate-200 text-xs font-bold uppercase tracking-wider text-slate-500">
               <th class="pb-3 pr-4">Sürücü</th>
@@ -403,6 +538,7 @@ onMounted(async () => {
               <th class="pb-3 pr-4">Bırakış</th>
               <th class="pb-3 pr-4">Dönem</th>
               <th class="pb-3 pr-4">Fiyat</th>
+              <th class="pb-3 pr-4">Fark</th>
               <th class="pb-3">İşlem</th>
             </tr>
           </thead>
@@ -410,9 +546,16 @@ onMounted(async () => {
             <tr
               v-for="r in listedRentals"
               :key="r.id"
-              class="border-b border-slate-100"
+              class="border-b border-slate-100 transition-colors duration-150 hover:bg-slate-50/80"
             >
-              <td class="py-3 pr-4 font-semibold text-slate-800">{{ r.surucu_adi }}</td>
+              <td class="py-3 pr-4">
+                <div class="flex items-center gap-2.5">
+                  <span class="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-brand-50 text-[11px] font-black text-brand-700">
+                    {{ initialsFor(r.surucu_adi) || '—' }}
+                  </span>
+                  <span class="font-semibold text-slate-800">{{ r.surucu_adi }}</span>
+                </div>
+              </td>
               <td class="py-3 pr-4">
                 <span class="font-bold">{{ r.plaka }}</span>
                 <span class="ml-1 text-slate-500">{{ r.marka_model }}</span>
@@ -427,17 +570,38 @@ onMounted(async () => {
               <td class="py-3 pr-4 font-semibold text-slate-800">
                 {{ r.quoted_total ? formatTL(r.quoted_total, { decimals: true }) : '—' }}
               </td>
+              <td class="py-3 pr-4 font-semibold" :class="priceDiffClass(r)">
+                {{ formatPriceDiff(r) }}
+              </td>
               <td class="py-3">
-                <button
-                  v-if="canCancelRental(r)"
-                  type="button"
-                  class="text-xs font-bold text-rose-600 hover:text-rose-800"
-                  :disabled="rentalStore.cancellingId === r.id"
-                  @click="cancelReservation(r)"
-                >
-                  {{ rentalStore.cancellingId === r.id ? 'İptal…' : 'Rezervasyonu İptal' }}
-                </button>
-                <span v-else class="text-xs text-slate-400">—</span>
+                <div class="flex flex-wrap items-center gap-3">
+                  <button
+                    v-if="canReturnRental(r)"
+                    type="button"
+                    class="text-xs font-bold text-emerald-600 hover:text-emerald-800"
+                    @click="openReturnModal(r)"
+                  >
+                    Teslim Al
+                  </button>
+                  <button
+                    v-if="canReturnRental(r)"
+                    type="button"
+                    class="text-xs font-bold text-sky-600 hover:text-sky-800"
+                    @click="openExtendModal(r)"
+                  >
+                    Uzat
+                  </button>
+                  <button
+                    v-if="canCancelRental(r)"
+                    type="button"
+                    class="text-xs font-bold text-rose-600 hover:text-rose-800"
+                    :disabled="rentalStore.cancellingId === r.id"
+                    @click="cancelReservation(r)"
+                  >
+                    {{ rentalStore.cancellingId === r.id ? 'İptal…' : 'Rezervasyonu İptal' }}
+                  </button>
+                  <span v-if="!canReturnRental(r) && !canCancelRental(r)" class="text-xs text-slate-400">—</span>
+                </div>
               </td>
             </tr>
           </tbody>
@@ -447,5 +611,19 @@ onMounted(async () => {
         Bu kategoride rezervasyon yok.
       </p>
     </div>
+
+    <ReturnVehicleModal
+      v-if="returnTarget"
+      :rental="returnTarget"
+      @close="closeReturnModal"
+      @returned="onVehicleReturned"
+    />
+
+    <ExtendRentalModal
+      v-if="extendTarget"
+      :rental="extendTarget"
+      @close="closeExtendModal"
+      @extended="onRentalExtended"
+    />
   </div>
 </template>

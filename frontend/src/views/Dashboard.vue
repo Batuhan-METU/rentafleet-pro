@@ -92,7 +92,8 @@ const filteredDrivers = computed(() => {
 })
 
 function refreshDrivers() {
-  driverStore.fetchDrivers()
+  const vehicleId = workflow.active && workflow.vehicleId ? workflow.vehicleId : null
+  driverStore.fetchDrivers({ vehicleId })
 }
 
 function openAddDriver() {
@@ -134,7 +135,7 @@ async function quickAutoReserve(driver) {
       vehicle_id: workflow.vehicleId,
       pickup_date: workflow.pickupDate,
       dropoff_date: workflow.dropoffDate,
-      quoted_total: workflow.agreedPrice ?? null,
+      daily_rate: workflow.agreedDailyRate ?? null,
       deposit_amount: workflow.depositAmount ?? null,
     })
     workflow.clear()
@@ -187,14 +188,23 @@ async function onVehicleSaved() {
 
 onMounted(() => {
   ui.initNavigation(auth.isFleetManager)
-  driverStore.fetchDrivers()
+  refreshDrivers()
 })
 
 watch(activeView, (view) => {
   if (view === 'drivers') {
-    driverStore.fetchDrivers()
+    refreshDrivers()
   }
 }, { immediate: true })
+
+watch(
+  () => [workflow.active, workflow.vehicleId],
+  () => {
+    if (activeView.value === 'drivers' && workflow.active) {
+      refreshDrivers()
+    }
+  },
+)
 </script>
 
 <template>
@@ -247,7 +257,7 @@ watch(activeView, (view) => {
       </button>
 
       <button
-        v-if="activeView !== 'live' && activeView !== 'maintenance' && activeView !== 'pricing' && activeView !== 'reservations' && activeView !== 'drivers' && activeView !== 'vehicles'"
+        v-if="activeView !== 'live' && activeView !== 'maintenance' && activeView !== 'pricing' && activeView !== 'reservations' && activeView !== 'drivers' && activeView !== 'vehicles' && activeView !== 'overview'"
         type="button"
         class="rf-btn-primary"
         :disabled="loading"

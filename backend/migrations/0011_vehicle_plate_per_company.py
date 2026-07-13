@@ -6,7 +6,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("api", "0010_restore_competitor_price_fields"),
+        ("api", "0008_company_description"),
     ]
 
     operations = [

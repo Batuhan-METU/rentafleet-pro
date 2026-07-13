@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import datetime as dt
 import random
+from decimal import Decimal
 from typing import Any, Iterable, Iterator
 
 from clickhouse_connect.driver.exceptions import OperationalError
@@ -45,6 +46,7 @@ from backend.apps.customer_profiles.models import (
 from backend.apps.reservations.models import (
     Rental,
     RentalStatus,
+    ReturnStatus,
 )
 from backend.apps.companies.models import (
     Company,
@@ -136,6 +138,10 @@ SEED_VEHICLE_CATALOG: tuple[tuple[str, str, str], ...] = (
     ("Peugeot", "Rifter", "FVMR"),
 )
 TELEMETRY_INTERVAL_SECONDS = 60  # one ping per minute of simulated driving
+
+# Segment başına gerçekçi günlük fiyat bantları (TL) — rezervasyon seed'inde kullanılır.
+DAILY_RATE_CHOICES: tuple[int, ...] = (900, 1100, 1300, 1600, 2000, 2500, 3200, 4000, 4800)
+LATE_PENALTY_MULTIPLIER = Decimal("1.25")
 
 
 class Command(BaseCommand):
@@ -330,59 +336,176 @@ class Command(BaseCommand):
         Driver.objects.bulk_create(drivers)
         return list(Driver.objects.filter(company=company).order_by("-id")[:count])
 
-    @transaction.atomic
     def _seed_rentals(
         self, faker: Faker, drivers: list[Driver], vehicles: list[Vehicle]
     ) -> None:
-        """Kiralama kayıtları: kiradaki araçlara aktif, diğerlerine geçmiş kiralama."""
-        self.stdout.write("Linking drivers to vehicles via rentals...")
+        """Rezervasyon geçmişini tüm senaryolarla doldur.
+
+        Kapsanan durumlar: Aktif (düz + uzatılmış), Gelecek, İptal (gelecek),
+        ve Geçmiş — zamanında / erken teslim alınan / geç teslim alınan üçlü
+        ayrımı. Her kayıtta ``daily_rate``/``original_ended_at`` doldurulur ki
+        fiyat farkı hesapları ve 3'lü geçmiş ayrımı gerçek verilerle test
+        edilebilsin.
+        """
+        self.stdout.write("Linking drivers to vehicles via rentals (all scenarios)...")
         now = timezone.now()
         available_drivers = drivers.copy()
         random.shuffle(available_drivers)
+        available_vehicles_pool = [v for v in vehicles if v.status == VehicleStatus.AVAILABLE]
+        random.shuffle(available_vehicles_pool)
         rentals: list[Rental] = []
 
+        def pop_driver() -> Driver | None:
+            if available_drivers:
+                return available_drivers.pop()
+            return random.choice(drivers) if drivers else None
+
+        def daily_rate() -> Decimal:
+            return Decimal(random.choice(DAILY_RATE_CHOICES))
+
+        # 1) AKTİF — şu an kirada olan araçlar. Bir kısmı düz (uzatılmamış),
+        #    bir kısmı zaten uzatılmış (original_ended_at != ended_at) olsun ki
+        #    "Uzat" ve "uzatma sonrası geç teslim" akışları canlı veriyle
+        #    test edilebilsin.
         rented_vehicles = [v for v in vehicles if v.status == VehicleStatus.RENTED]
-        for vehicle in rented_vehicles:
-            if not available_drivers:
+        for i, vehicle in enumerate(rented_vehicles):
+            driver = pop_driver()
+            if driver is None:
                 break
-            driver = available_drivers.pop()
-            days_ago = random.randint(1, 14)
+            rate = daily_rate()
+            days_ago = random.randint(1, 12)
+            duration = random.randint(3, 12)
+            started_at = now - dt.timedelta(days=days_ago)
+            original_ended_at = started_at + dt.timedelta(days=duration)
+            ended_at = original_ended_at
+            if i % 4 == 0:  # ~%25'i zaten uzatılmış olsun
+                ended_at = original_ended_at + dt.timedelta(days=random.randint(1, 5))
             start_km = max(0, vehicle.current_km - random.randint(200, 3_000))
             rentals.append(
                 Rental(
                     driver=driver,
                     vehicle=vehicle,
                     status=RentalStatus.ACTIVE,
-                    started_at=now - dt.timedelta(days=days_ago),
+                    started_at=started_at,
+                    ended_at=ended_at,
+                    original_ended_at=original_ended_at,
                     start_km=start_km,
+                    daily_rate=rate,
+                    quoted_total=rate * duration,
                 )
             )
 
-        for vehicle in vehicles:
-            if vehicle.status != VehicleStatus.AVAILABLE:
-                continue
-            if random.random() > 0.35 or not drivers:
-                continue
-            driver = random.choice(drivers)
+        # 2) GELECEK — henüz başlamamış, ileri tarihli rezervasyonlar.
+        future_count = min(10, len(available_vehicles_pool))
+        future_vehicles = [available_vehicles_pool.pop() for _ in range(future_count)]
+        for vehicle in future_vehicles:
+            driver = pop_driver()
+            if driver is None:
+                break
+            rate = daily_rate()
             duration = random.randint(2, 10)
-            ended_days_ago = random.randint(3, 45)
-            end_at = now - dt.timedelta(days=ended_days_ago)
-            start_at = end_at - dt.timedelta(days=duration)
+            started_at = now + dt.timedelta(days=random.randint(1, 21))
+            ended_at = started_at + dt.timedelta(days=duration)
+            rentals.append(
+                Rental(
+                    driver=driver,
+                    vehicle=vehicle,
+                    status=RentalStatus.ACTIVE,
+                    started_at=started_at,
+                    ended_at=ended_at,
+                    original_ended_at=ended_at,
+                    start_km=vehicle.current_km,
+                    daily_rate=rate,
+                    quoted_total=rate * duration,
+                )
+            )
+
+        # 3) İPTAL — gelecekte iptal edilmiş rezervasyonlar (fiyat farkı yoktur).
+        cancel_count = min(4, len(available_vehicles_pool))
+        cancel_vehicles = [available_vehicles_pool.pop() for _ in range(cancel_count)]
+        for vehicle in cancel_vehicles:
+            driver = pop_driver()
+            if driver is None:
+                break
+            rate = daily_rate()
+            duration = random.randint(2, 8)
+            started_at = now + dt.timedelta(days=random.randint(2, 15))
+            ended_at = started_at + dt.timedelta(days=duration)
+            rentals.append(
+                Rental(
+                    driver=driver,
+                    vehicle=vehicle,
+                    status=RentalStatus.CANCELLED,
+                    started_at=started_at,
+                    ended_at=ended_at,
+                    original_ended_at=ended_at,
+                    start_km=vehicle.current_km,
+                    daily_rate=rate,
+                    quoted_total=rate * duration,
+                )
+            )
+
+        # 4) GEÇMİŞ — zamanında / erken teslim alınan / geç teslim alınan
+        #    üçlü ayrımını eşit ağırlıkla kapsayacak şekilde dağıt. Tamamlanmış
+        #    kayıtlar hiçbir canlı çakışma yaratmaz, bu yüzden yukarıdaki
+        #    havuzdan değil filonun tamamından (durumu ne olursa olsun) örneklenir.
+        history_pool = vehicles.copy()
+        random.shuffle(history_pool)
+        history_count = min(24, len(history_pool))
+        history_vehicles = history_pool[:history_count]
+        outcomes = ["ON_TIME", "EARLY", "LATE"]
+        for idx, vehicle in enumerate(history_vehicles):
+            if not drivers:
+                break
+            driver = random.choice(drivers)
+            rate = daily_rate()
+            duration = random.randint(2, 10)
+            ended_days_ago = random.randint(3, 60)
+            original_ended_at = now - dt.timedelta(days=ended_days_ago)
+            start_at = original_ended_at - dt.timedelta(days=duration)
             start_km = max(0, vehicle.current_km - random.randint(500, 8_000))
+
+            outcome = outcomes[idx % 3]
+            if outcome == "ON_TIME":
+                actual_return_at = original_ended_at + dt.timedelta(minutes=random.randint(0, 90))
+                price_difference = Decimal("0")
+                return_status = ReturnStatus.ON_TIME
+            elif outcome == "EARLY":
+                early_days = random.randint(1, max(duration - 1, 1))
+                actual_return_at = original_ended_at - dt.timedelta(days=early_days)
+                price_difference = -(rate * early_days)
+                return_status = ReturnStatus.EARLY
+            else:
+                late_days = random.randint(1, 5)
+                actual_return_at = original_ended_at + dt.timedelta(days=late_days, hours=3)
+                price_difference = (rate * late_days * LATE_PENALTY_MULTIPLIER).quantize(Decimal("0.01"))
+                return_status = ReturnStatus.LATE
+
             rentals.append(
                 Rental(
                     driver=driver,
                     vehicle=vehicle,
                     status=RentalStatus.COMPLETED,
                     started_at=start_at,
-                    ended_at=end_at,
+                    ended_at=original_ended_at,
+                    original_ended_at=original_ended_at,
+                    actual_return_at=actual_return_at,
+                    return_status=return_status,
+                    price_difference=price_difference,
                     start_km=start_km,
                     end_km=vehicle.current_km - random.randint(0, 500),
+                    daily_rate=rate,
+                    quoted_total=rate * duration,
                 )
             )
 
-        Rental.objects.bulk_create(rentals)
-        self.stdout.write(f"  + {len(rentals)} rental records created")
+        with transaction.atomic():
+            Rental.objects.bulk_create(rentals)
+        self.stdout.write(
+            f"  + {len(rentals)} rental records created "
+            f"(active={len(rented_vehicles)}, future={len(future_vehicles)}, "
+            f"cancelled={len(cancel_vehicles)}, history={len(history_vehicles)})"
+        )
 
     @staticmethod
     def _fake_plate(faker: Faker) -> str:

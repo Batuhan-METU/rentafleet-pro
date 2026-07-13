@@ -12,27 +12,25 @@ from rest_framework.views import APIView
 
 from backend.application.customer.profiles import apply_customer_profiles
 from backend.application.customer.snapshots import ensure_customer_profiles
-from backend.application.driver.evaluate_driver import DriverEvaluationService, RISK_LEVEL_LABELS
-from backend.domain.eligibility.engine import recommend_vehicles
-from backend.domain.rule_engine.thresholds import score_to_risk_level
+from backend.application.driver.evaluate_driver import DriverEvaluationService
+from backend.application.driver.risk_payload import build_driver_risk_payload
+from backend.application.rental.driver_eligibility import (
+    driver_has_risk_approval,
+    is_driver_eligible_for_vehicle,
+)
 from backend.apps.customer_profiles.serializers import DriverCreateRequestSerializer, DriverSerializer
 from backend.apps.customer_profiles.models import Driver
-from backend.apps.reservations.models import (
-    Rental,
-    RentalStatus,
-)
+from backend.apps.risk_checks.evaluation import RISK_LEVEL_LABELS
+from backend.apps.risk_checks.models import CustomerRiskSnapshot
+from backend.apps.reservations.models import Rental, RentalStatus
 from backend.apps.vehicles.models import VehicleLiveState
 from backend.common.permissions import IsFleetStaff
 from backend.infrastructure.services.analytics.scoring_service import calculate_driver_score, driver_comment
 from backend.infrastructure.services.sipp.sipp_service import format_marka_model_sinif
-from backend.common.multitenancy_tools.scope import get_scoped_driver, scoped_drivers
+from backend.common.multitenancy_tools.scope import get_scoped_driver, get_scoped_vehicle, scoped_drivers
 
 
 def _active_rental_payload(driver: Driver) -> dict | None:
-    # ``active_rentals`` prefetch cache'i varsa (DriverListView) onu kullan;
-    # yoksa (tekil driver — detay/oluşturma) doğrudan sorgula. Prefetch
-    # edilmiş bir queryset üzerinde ``.filter()`` çağırmak önbelleği baypas
-    # edip N+1'e yol açar, bu yüzden burada ayrım yapılır.
     active_rentals = getattr(driver, "active_rentals", None)
     if active_rentals is not None:
         rental = active_rentals[0] if active_rentals else None
@@ -62,12 +60,6 @@ def _active_rental_payload(driver: Driver) -> dict | None:
     }
 
 
-def _risk_level_for_driver(driver: Driver) -> str | None:
-    if driver.current_risk_score is None:
-        return None
-    return score_to_risk_level(driver.current_risk_score).value
-
-
 def _profile_summary(driver: Driver) -> dict:
     ensure_customer_profiles(driver)
     identity = getattr(driver, "identity_profile", None)
@@ -91,48 +83,22 @@ def _profile_summary(driver: Driver) -> dict:
     }
 
 
-def _latest_evaluation_payload(driver: Driver) -> dict | None:
-    snapshot = driver.risk_snapshots.order_by("-computed_at").first()
-    if snapshot is None and driver.current_risk_score is None:
-        return None
-
-    level = snapshot.risk_level if snapshot else _risk_level_for_driver(driver)
-    breakdown = snapshot.factor_breakdown if snapshot else {}
-    audit = breakdown.get("audit") or {}
-    vehicles = breakdown.get("eligible_vehicles")
-    if level and (vehicles is None):
-        vehicles = recommend_vehicles(driver.company_id, level)
-
-    blockers = audit.get("blockers", [])
-    eligible = vehicles or []
-    onaylandi = bool(level) and not blockers and bool(eligible)
-
-    return {
-        "skor": snapshot.risk_score if snapshot else driver.current_risk_score,
-        "seviye": level,
-        "seviye_label": RISK_LEVEL_LABELS.get(level or "", level or "—"),
-        "onaylandi": onaylandi,
-        "depozito": breakdown.get("deposit_amount"),
-        "uygun_araclar": eligible,
-        "uyarilar": audit.get("warnings", []),
-        "blokajlar": blockers,
-        "faktorler": audit.get("outcomes", []),
-    }
-
-
-def _driver_list_item(driver: Driver) -> dict:
+def _driver_list_item(driver: Driver, *, vehicle=None) -> dict:
     data = DriverSerializer(driver).data
-    level = _risk_level_for_driver(driver)
+    level = driver.risk_level or None
     data["risk_skoru"] = driver.current_risk_score
     data["risk_seviye"] = level
     data["risk_seviye_label"] = RISK_LEVEL_LABELS.get(level or "", "—") if level else "—"
+    data["risk_onaylandi"] = driver_has_risk_approval(driver)
     data["aktif_kiralama"] = _active_rental_payload(driver)
+    if vehicle is not None:
+        data["araca_uygun"] = is_driver_eligible_for_vehicle(driver, vehicle)
     return data
 
 
 def _driver_detail_item(driver: Driver) -> dict:
     data = _driver_list_item(driver)
-    evaluation = _latest_evaluation_payload(driver)
+    evaluation = build_driver_risk_payload(driver)
     data["risk"] = evaluation
     data["profil_ozeti"] = _profile_summary(driver)
     return data
@@ -144,7 +110,11 @@ def _apply_driver_profiles(driver: Driver, data: dict) -> None:
 
 
 class DriverListView(ListAPIView):
-    """GET /api/drivers/ — filodaki tüm sürücüler."""
+    """GET /api/drivers/ — filodaki sürücüler.
+
+    ``vehicle_id`` sorgu parametresi verilirse yalnızca seçilen araca
+    risk skoru yeten sürücüler döner.
+    """
 
     serializer_class = DriverSerializer
     permission_classes = (IsFleetStaff,)
@@ -160,18 +130,32 @@ class DriverListView(ListAPIView):
                         "vehicle", "vehicle__live_state"
                     ),
                     to_attr="active_rentals",
-                )
+                ),
+                Prefetch(
+                    "risk_snapshots",
+                    queryset=CustomerRiskSnapshot.objects.order_by("-computed_at"),
+                ),
             )
             .order_by("last_name", "first_name")
         )
 
     def list(self, request: Request, *args, **kwargs) -> Response:
         queryset = self.filter_queryset(self.get_queryset())
+        vehicle = None
+        vehicle_id = request.query_params.get("vehicle_id")
+        if vehicle_id:
+            vehicle = get_scoped_vehicle(request, vehicle_id)
+
         drivers = list(queryset)
+        if vehicle is not None:
+            drivers = [driver for driver in drivers if is_driver_eligible_for_vehicle(driver, vehicle)]
+
+        items = [_driver_list_item(driver, vehicle=vehicle) for driver in drivers]
         return Response(
             {
-                "surucu_sayisi": len(drivers),
-                "surucular": [_driver_list_item(driver) for driver in drivers],
+                "surucu_sayisi": len(items),
+                "surucular": items,
+                "vehicle_id": vehicle.pk if vehicle else None,
             }
         )
 

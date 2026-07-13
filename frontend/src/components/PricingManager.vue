@@ -210,11 +210,12 @@ async function onSimulationApplied() {
   await runAnalysis()
 }
 
-async function onOfferAccepted(price) {
+async function onOfferAccepted(price, dailyRate) {
   if (!selectedVehicle.value || !datesValid.value) return
   workflow.acceptPricingOffer({
     vehicle: selectedVehicle.value,
     agreedPrice: price,
+    agreedDailyRate: dailyRate,
     pickupDate: pickupDate.value,
     dropoffDate: dropoffDate.value,
   })
@@ -279,40 +280,36 @@ onMounted(async () => {
       </p>
     </RentalWorkflowProgress>
 
-    <div class="flex flex-wrap items-end justify-between gap-3">
-      <div>
-        <h2 class="text-xl font-semibold text-slate-900">Fiyatlandırma</h2>
-        <p class="text-sm text-slate-500">Tarih seç → maliyet tabanını gör → toplam fiyatı gir</p>
-      </div>
-    </div>
-
     <div v-if="loading && !vehicles.length" class="flex justify-center py-16">
       <div class="h-8 w-8 animate-spin rounded-full border-2 border-slate-200 border-t-slate-800" />
     </div>
 
     <template v-else>
       <!-- 1. Tarih + araç -->
-      <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-        <p class="mb-3 text-sm font-medium text-slate-800">1. Kiralama dönemi</p>
+      <div class="rf-glass-strong rounded-3xl p-5">
+        <p class="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-500">
+          <span class="grid h-5 w-5 place-items-center rounded-full bg-brand-600 text-[10px] font-black text-white">1</span>
+          Kiralama Dönemi
+        </p>
         <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <div>
-            <label class="text-xs text-slate-500">Alış tarihi</label>
+            <label class="text-xs font-medium text-slate-500">Alış tarihi</label>
             <input v-model="pickupDate" type="date" :min="minPickupDate" class="rf-input mt-1 w-full" />
           </div>
           <div>
-            <label class="text-xs text-slate-500">Dönüş tarihi</label>
+            <label class="text-xs font-medium text-slate-500">Dönüş tarihi</label>
             <input v-model="dropoffDate" type="date" :min="pickupDate || minPickupDate" class="rf-input mt-1 w-full" />
           </div>
           <div class="flex items-end">
-            <div class="w-full rounded-lg bg-slate-50 px-3 py-2.5 text-center">
-              <p class="text-xs text-slate-500">Süre</p>
-              <p class="text-lg font-semibold text-slate-900">{{ datesValid ? rentalDays : '—' }} gün</p>
+            <div class="w-full rounded-2xl bg-brand-50 px-3 py-2.5 text-center">
+              <p class="text-xs font-bold uppercase tracking-wide text-brand-700/70">Süre</p>
+              <p class="text-lg font-black text-brand-900">{{ datesValid ? rentalDays : '—' }} gün</p>
             </div>
           </div>
           <div class="flex items-end">
             <button
               type="button"
-              class="w-full rounded-lg bg-slate-900 py-2.5 text-sm font-medium text-white disabled:opacity-40"
+              class="rf-btn-primary w-full justify-center disabled:opacity-40"
               :disabled="!selectedVehicleId || competitorLoading || finance.quoteLoading"
               @click="runAnalysis({ refreshMarket: true })"
             >
@@ -320,25 +317,28 @@ onMounted(async () => {
             </button>
           </div>
         </div>
-        <p v-if="dateError" class="mt-2 text-sm text-red-600">{{ dateError }}</p>
+        <p v-if="dateError" class="mt-2 text-sm font-semibold text-red-600">{{ dateError }}</p>
         <p v-else-if="analysisReady && windowLabel" class="mt-2 text-xs text-slate-500">{{ windowLabel }}</p>
       </div>
 
       <!-- Araç seçimi -->
-      <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-        <p class="mb-3 text-sm font-medium text-slate-800">2. Araç</p>
+      <div class="rf-glass-strong rounded-3xl p-5">
+        <p class="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-500">
+          <span class="grid h-5 w-5 place-items-center rounded-full bg-brand-600 text-[10px] font-black text-white">2</span>
+          Araç
+        </p>
         <div class="flex gap-2 overflow-x-auto pb-1">
           <button
             v-for="v in vehicles"
             :key="v.id"
             type="button"
-            class="shrink-0 rounded-lg border px-3 py-2 text-left text-sm transition"
+            class="shrink-0 rounded-2xl border px-3.5 py-2.5 text-left text-sm transition-all duration-200"
             :class="selectedVehicleId === v.id
-              ? 'border-slate-900 bg-slate-900 text-white'
-              : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'"
+              ? 'border-transparent bg-gradient-to-br from-brand-600 to-brand-700 text-white shadow-md'
+              : 'border-white/50 bg-white/40 text-slate-700 hover:border-brand-300 hover:bg-white/70'"
             @click="selectVehicle(v.id)"
           >
-            <span class="font-semibold">{{ v.plate_number }}</span>
+            <span class="font-black tracking-wide">{{ v.plate_number }}</span>
             <span class="block text-xs opacity-80">{{ v.brand }} {{ v.model }}</span>
           </button>
         </div>
@@ -347,23 +347,23 @@ onMounted(async () => {
       <!-- 3. Analiz panelleri -->
       <div v-if="selectedVehicleId && analysisReady" class="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:items-start">
         <!-- Piyasa -->
-        <div class="flex max-h-[32rem] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-          <div class="border-b border-slate-100 px-4 py-3">
-            <h3 class="text-sm font-semibold text-slate-800">Piyasa fiyatları</h3>
+        <div class="rf-glass-strong flex max-h-[32rem] flex-col overflow-hidden rounded-3xl">
+          <div class="border-b border-white/30 px-5 py-4">
+            <h3 class="text-sm font-black uppercase tracking-wide text-slate-800">Piyasa Fiyatları</h3>
             <p class="text-xs text-slate-500">{{ windowLabel }}</p>
           </div>
-          <div v-if="marketStatistics" class="grid grid-cols-3 gap-px border-b border-slate-100 bg-slate-100 text-center text-xs">
-            <div class="bg-white px-2 py-2">
-              <p class="text-slate-400">Min</p>
-              <p class="font-semibold text-slate-800">{{ formatPrice(marketStatistics.minPrice) }}</p>
+          <div v-if="marketStatistics" class="grid grid-cols-3 gap-2 border-b border-white/30 px-5 py-3 text-center text-xs">
+            <div class="rounded-2xl bg-slate-900/[0.03] px-2 py-2.5">
+              <p class="font-bold uppercase tracking-wide text-slate-400">Min</p>
+              <p class="mt-0.5 font-black text-slate-800">{{ formatPrice(marketStatistics.minPrice) }}</p>
             </div>
-            <div class="bg-white px-2 py-2">
-              <p class="text-slate-400">Ort</p>
-              <p class="font-semibold text-slate-800">{{ formatPrice(marketStatistics.averagePrice) }}</p>
+            <div class="rounded-2xl bg-brand-50 px-2 py-2.5">
+              <p class="font-bold uppercase tracking-wide text-brand-700/70">Ort</p>
+              <p class="mt-0.5 font-black text-brand-900">{{ formatPrice(marketStatistics.averagePrice) }}</p>
             </div>
-            <div class="bg-white px-2 py-2">
-              <p class="text-slate-400">Max</p>
-              <p class="font-semibold text-slate-800">{{ formatPrice(marketStatistics.maxPrice) }}</p>
+            <div class="rounded-2xl bg-slate-900/[0.03] px-2 py-2.5">
+              <p class="font-bold uppercase tracking-wide text-slate-400">Max</p>
+              <p class="mt-0.5 font-black text-slate-800">{{ formatPrice(marketStatistics.maxPrice) }}</p>
             </div>
           </div>
           <div class="flex-1 overflow-y-auto">
@@ -371,22 +371,22 @@ onMounted(async () => {
               Yükleniyor…
             </div>
             <table v-else-if="marketListings.length" class="w-full text-sm">
-              <thead class="sticky top-0 bg-slate-50 text-xs text-slate-500">
+              <thead class="sticky top-0 bg-white/90 text-xs font-bold uppercase tracking-wide text-slate-400 backdrop-blur-sm">
                 <tr>
-                  <th class="px-4 py-2 text-left font-medium">Firma</th>
-                  <th class="px-4 py-2 text-left font-medium">Araç</th>
-                  <th class="px-4 py-2 text-right font-medium">Günlük</th>
+                  <th class="px-5 py-2 text-left">Firma</th>
+                  <th class="px-5 py-2 text-left">Araç</th>
+                  <th class="px-5 py-2 text-right">Günlük</th>
                 </tr>
               </thead>
               <tbody>
                 <tr
                   v-for="(row, idx) in marketListings"
                   :key="idx"
-                  class="border-t border-slate-100"
+                  class="border-t border-white/30 transition-colors hover:bg-white/40"
                 >
-                  <td class="px-4 py-2 font-medium text-slate-800">{{ row.kaynak || row.provider }}</td>
-                  <td class="px-4 py-2 text-slate-500">{{ row.benzer_arac || `${row.brand} ${row.model}` }}</td>
-                  <td class="px-4 py-2 text-right font-semibold text-slate-900">
+                  <td class="px-5 py-2.5 font-semibold text-slate-800">{{ row.kaynak || row.provider }}</td>
+                  <td class="px-5 py-2.5 text-slate-500">{{ row.benzer_arac || `${row.brand} ${row.model}` }}</td>
+                  <td class="px-5 py-2.5 text-right font-black text-slate-900">
                     {{ formatPrice(row.gunluk_fiyat ?? row.dailyPrice) }}
                   </td>
                 </tr>
@@ -419,7 +419,7 @@ onMounted(async () => {
 
       <div
         v-else-if="selectedVehicleId && !analysisReady"
-        class="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500"
+        class="rf-glass rounded-3xl border border-dashed border-white/50 px-4 py-10 text-center text-sm text-slate-500"
       >
         <template v-if="competitorLoading || finance.quoteLoading">
           Piyasa verileri ve maliyet analizi yükleniyor…

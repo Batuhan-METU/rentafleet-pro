@@ -12,3 +12,11 @@ class RentalStatus(models.TextChoices):
     ACTIVE = "ACTIVE", _("Aktif")
     COMPLETED = "COMPLETED", _("Tamamlandı")
     CANCELLED = "CANCELLED", _("İptal")
+
+
+class ReturnStatus(models.TextChoices):
+    """Araç teslim alma anındaki zamanlama sınıflandırması."""
+
+    ON_TIME = "ON_TIME", _("Zamanında")
+    EARLY = "EARLY", _("Erken")
+    LATE = "LATE", _("Geç")

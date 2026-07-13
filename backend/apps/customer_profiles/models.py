@@ -6,6 +6,7 @@ from django.utils.translation import gettext_lazy as _
 
 from backend.apps.customer_profiles.choices import Gender
 from backend.apps.companies.models import Company
+from backend.apps.risk_checks.choices import RiskLevel
 
 __all__ = ["Driver", "Gender"]
 
@@ -105,6 +106,13 @@ class Driver(models.Model):
         _("current risk score"),
         null=True,
         blank=True,
+    )
+    risk_level = models.CharField(
+        _("risk level"),
+        max_length=16,
+        choices=RiskLevel.choices,
+        blank=True,
+        default="",
     )
     current_driving_score = models.PositiveSmallIntegerField(
         _("current driving score"),

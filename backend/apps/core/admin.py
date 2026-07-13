@@ -12,8 +12,6 @@ from backend.apps.risk_checks.models import (
     CustomerFinancialProfile,
     CustomerIdentityProfile,
     CustomerLicenseProfile,
-    CustomerRentalHistoryStats,
-    CustomerRiskSnapshot,
     RentalApplication,
     RentalDecisionLog,
     RuleDefinition,

@@ -7,7 +7,7 @@ import { useVehicleStore } from '../../stores/vehicleStore.js'
 import { formatNumber, formatTL } from '../../utils/format.js'
 import { VEHICLE_STATUS_LABELS } from '../../utils/vehicleStatus.js'
 import FleetDonutChart from './FleetDonutChart.vue'
-import RevenueBarChart from './RevenueBarChart.vue'
+import RevenueLineChart from './RevenueLineChart.vue'
 import NavigationLoadingOverlay from './NavigationLoadingOverlay.vue'
 
 const props = defineProps({
@@ -41,6 +41,8 @@ const fleet = computed(() => {
   }
 })
 
+// Donut segment renkleri, filo kartlarının aksan rengiyle bire bir eşleşir —
+// gösterge ile kart arasında tutarlı bir renk dili kurar (rastgele gradyanlar yerine).
 const donutSegments = computed(() => [
   { label: VEHICLE_STATUS_LABELS.RENTED, value: fleet.value.kirada, color: '#6366f1' },
   { label: VEHICLE_STATUS_LABELS.AVAILABLE, value: fleet.value.musait, color: '#06b6d4' },
@@ -48,18 +50,33 @@ const donutSegments = computed(() => [
 ])
 
 const fleetCards = computed(() => [
-  { key: 'toplam', label: 'Filo Büyüklüğü', value: fleet.value.toplam, gradient: 'from-slate-800 to-slate-950', glow: 'shadow-slate-300/30' },
-  { key: 'kirada', label: 'Kiradaki Araç', value: fleet.value.kirada, gradient: 'from-indigo-500 to-violet-600', glow: 'shadow-indigo-300/40' },
-  { key: 'musait', label: 'Müsait Araç', value: fleet.value.musait, gradient: 'from-cyan-400 to-teal-500', glow: 'shadow-cyan-300/40' },
-  { key: 'bakimda', label: 'Bakımdaki Araç', value: fleet.value.bakimda, gradient: 'from-rose-400 to-pink-500', glow: 'shadow-rose-300/40' },
+  { key: 'toplam', label: 'Filo Büyüklüğü', value: fleet.value.toplam, accent: null },
+  { key: 'kirada', label: 'Kiradaki Araç', value: fleet.value.kirada, accent: '#6366f1' },
+  { key: 'musait', label: 'Müsait Araç', value: fleet.value.musait, accent: '#06b6d4' },
+  { key: 'bakimda', label: 'Bakımdaki Araç', value: fleet.value.bakimda, accent: '#f43f5e' },
 ])
 
+// İkon path'leri statMeta ile aynı anahtarları (stat.anahtar) kullanır; salt
+// sunum amaçlı, backend'den gelen veriyi veya hesaplama mantığını etkilemez.
+const STAT_ICON_PATHS = {
+  net_kazanc:
+    'M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z',
+  yillik_gelir:
+    'M2.25 18L9 11.25l4.306 4.306a11.95 11.95 0 015.814-5.518l2.74-1.22m0 0l-5.94-2.28m5.94 2.28l-2.28 5.941',
+  net_kar:
+    'M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.75h-.152c-3.196 0-6.1-1.248-8.25-3.286z',
+  kiralama_sayisi:
+    'M9 17a2 2 0 11-4 0 2 2 0 014 0zM19 17a2 2 0 11-4 0 2 2 0 014 0z M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h1m8-1a1 1 0 01-1 1H9m4-1V8a1 1 0 011-1h2.586a1 1 0 01.707.293l3.414 3.414a1 1 0 01.293.707V16a1 1 0 01-1 1h-1',
+  kiralanan_gun:
+    'M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5',
+}
+
 const statMeta = {
-  net_kazanc: { icon: '💰', gradient: 'from-violet-500/10 to-violet-600/5', accent: 'text-violet-600', ring: 'ring-violet-200' },
-  yillik_gelir: { icon: '📈', gradient: 'from-cyan-500/10 to-cyan-600/5', accent: 'text-cyan-600', ring: 'ring-cyan-200' },
-  net_kar: { icon: '✨', gradient: 'from-emerald-500/10 to-emerald-600/5', accent: 'text-emerald-600', ring: 'ring-emerald-200' },
-  kiralama_sayisi: { icon: '🚗', gradient: 'from-amber-500/10 to-amber-600/5', accent: 'text-amber-600', ring: 'ring-amber-200' },
-  kiralanan_gun: { icon: '📅', gradient: 'from-rose-500/10 to-rose-600/5', accent: 'text-rose-600', ring: 'ring-rose-200' },
+  net_kazanc: { accent: '#7c3aed', tint: 'rgba(124, 58, 237, 0.1)' },
+  yillik_gelir: { accent: '#0891b2', tint: 'rgba(8, 145, 178, 0.1)' },
+  net_kar: { accent: '#059669', tint: 'rgba(5, 150, 105, 0.1)' },
+  kiralama_sayisi: { accent: '#d97706', tint: 'rgba(217, 119, 6, 0.1)' },
+  kiralanan_gun: { accent: '#e11d48', tint: 'rgba(225, 29, 72, 0.1)' },
 }
 
 const shortcuts = [
@@ -115,8 +132,18 @@ function handleShortcut(item) {
 }
 
 function selectYear(year) {
-  if (year !== selectedYear.value) void overview.setYear(year)
+  if (year !== selectedYear.value) {
+    void overview.setYear(year)
+  }
 }
+
+// "Aylık Gelir Trendi" başlığının yanındaki dinamik dönem etiketi — gerçek
+// takvim ayı/yılını gösterir (seçili istatistik yılından bağımsız).
+const currentPeriodLabel = computed(() => {
+  const now = new Date()
+  const month = new Intl.DateTimeFormat('tr-TR', { month: 'long' }).format(now)
+  return `${month.charAt(0).toLocaleUpperCase('tr')}${month.slice(1)} ${now.getFullYear()}`
+})
 </script>
 
 <template>
@@ -144,36 +171,48 @@ function selectYear(year) {
     </div>
 
     <template v-else-if="company">
-      <!-- Hero -->
-      <section class="rf-hero relative overflow-hidden rounded-3xl p-6 shadow-2xl shadow-indigo-200/30 lg:p-8">
-        <div class="pointer-events-none absolute -left-16 -top-16 h-56 w-56 rounded-full bg-violet-400/30 blur-3xl" />
-        <div class="pointer-events-none absolute -bottom-20 -right-10 h-64 w-64 rounded-full bg-cyan-400/25 blur-3xl" />
+      <!-- Hero: markanın kendi diagonal-kesim imzasını (rf-slant) kullanır,
+           jenerik bulanık-baloncuk yerine. Canlı filo sayısı burada tek bakışta
+           görünür (sayfanın "tez"i: şu an elimizde ne var). -->
+      <section class="rf-hero relative overflow-hidden rounded-3xl shadow-2xl shadow-indigo-200/30">
+        <div class="rf-hero-slant absolute inset-y-0 right-0 w-2/5" />
 
-        <div class="relative flex items-center gap-5">
-          <div
-            v-if="company.logo_url"
-            class="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-white/90 p-2 shadow-xl ring-1 ring-white/60 backdrop-blur-sm"
-          >
-            <img :src="company.logo_url" :alt="company.ticari_unvan" class="max-h-full max-w-full object-contain" />
+        <div class="relative flex flex-col gap-6 p-6 sm:flex-row sm:items-center sm:justify-between lg:p-8">
+          <div class="flex items-center gap-5">
+            <div
+              v-if="company.logo_url"
+              class="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-white/90 p-2 shadow-xl ring-1 ring-white/60 backdrop-blur-sm"
+            >
+              <img :src="company.logo_url" :alt="company.ticari_unvan" class="max-h-full max-w-full object-contain" />
+            </div>
+            <div
+              v-else
+              class="flex h-20 w-20 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-600 font-display text-2xl font-black text-white shadow-xl"
+            >
+              {{ company.ticari_unvan?.slice(0, 2)?.toUpperCase() }}
+            </div>
+            <div>
+              <p class="text-xs font-bold uppercase tracking-[0.25em] text-violet-600/80">Hoş geldiniz</p>
+              <h2 class="font-display text-3xl font-black tracking-tight text-slate-900 lg:text-4xl">{{ company.ticari_unvan }}</h2>
+            </div>
           </div>
-          <div
-            v-else
-            class="flex h-20 w-20 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-600 text-2xl font-black text-white shadow-xl"
-          >
-            {{ company.ticari_unvan?.slice(0, 2)?.toUpperCase() }}
-          </div>
-          <div>
-            <p class="text-xs font-bold uppercase tracking-[0.25em] text-violet-600/80">Hoş geldiniz</p>
-            <h2 class="text-3xl font-black tracking-tight text-slate-900 lg:text-4xl">{{ company.ticari_unvan }}</h2>
+
+          <div class="rf-hero-stat relative flex items-center gap-4 self-start rounded-2xl bg-white/70 px-5 py-4 shadow-lg ring-1 ring-white/70 backdrop-blur-sm sm:self-auto">
+            <span class="rf-live-dot" aria-hidden="true" />
+            <div>
+              <p class="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">Aktif Filo</p>
+              <p class="font-display text-3xl font-black tabular-nums leading-none text-slate-900">{{ fleet.toplam }}</p>
+            </div>
           </div>
         </div>
       </section>
 
       <!-- Filo durumu + grafik -->
       <section class="rf-glass-card overflow-hidden rounded-3xl p-6 lg:p-8">
-        <div class="mb-6 flex items-center justify-between">
-          <h3 class="text-lg font-black text-slate-900">Filo Durumu</h3>
-          <span class="rounded-full bg-indigo-50 px-3 py-1 text-xs font-bold text-indigo-600 ring-1 ring-indigo-100">
+        <div class="rf-section-head mb-6 flex items-center justify-between">
+          <h3 class="font-display text-lg font-black text-slate-900">Filo Durumu</h3>
+          <span class="inline-flex items-center gap-1.5 rounded-full bg-indigo-50 px-3 py-1 text-xs font-bold text-indigo-600 ring-1 ring-indigo-100">
+            <span class="rf-live-dot rf-live-dot--sm" aria-hidden="true" />
             Canlı
           </span>
         </div>
@@ -185,12 +224,17 @@ function selectYear(year) {
             <div
               v-for="card in fleetCards"
               :key="card.key"
-              class="group relative overflow-hidden rounded-2xl bg-gradient-to-br p-5 text-white shadow-xl transition duration-300 hover:-translate-y-1 hover:shadow-2xl"
-              :class="[card.gradient, card.glow]"
+              class="rf-metric-card group relative overflow-hidden rounded-2xl p-5 transition duration-300 hover:-translate-y-1"
+              :class="card.accent ? 'rf-metric-card--tinted' : 'rf-metric-card--solid'"
+              :style="card.accent ? { '--rf-metric-accent': card.accent } : undefined"
             >
-              <div class="pointer-events-none absolute -right-6 -top-6 h-24 w-24 rounded-full bg-white/15 blur-2xl transition group-hover:scale-125" />
-              <p class="text-[11px] font-bold uppercase tracking-wider opacity-75">{{ card.label }}</p>
-              <p class="mt-2 text-4xl font-black">{{ card.value }}</p>
+              <p class="text-[11px] font-bold uppercase tracking-wider" :class="card.accent ? 'text-slate-500' : 'text-white/70'">{{ card.label }}</p>
+              <p
+                class="mt-2 font-display text-4xl font-black tabular-nums"
+                :class="card.accent ? 'text-slate-900' : 'text-white'"
+              >
+                {{ card.value }}
+              </p>
             </div>
           </div>
         </div>
@@ -214,7 +258,7 @@ function selectYear(year) {
                 <path stroke-linecap="round" stroke-linejoin="round" :d="item.icon" />
               </svg>
             </div>
-            <p class="relative text-base font-bold">{{ item.title }}</p>
+            <p class="relative font-display text-base font-bold">{{ item.title }}</p>
             <p class="relative mt-1 text-xs opacity-80">{{ item.desc }}</p>
           </button>
         </div>
@@ -224,7 +268,7 @@ function selectYear(year) {
       <section class="rf-glass-card rounded-3xl p-6 lg:p-8">
         <div class="mb-6 flex flex-wrap items-center justify-between gap-4">
           <div>
-            <h3 class="text-xl font-black text-slate-900">İşletme İstatistikleri</h3>
+            <h3 class="font-display text-xl font-black text-slate-900">İşletme İstatistikleri</h3>
             <p class="mt-1 text-sm text-slate-500">Yıllık finansal performans</p>
           </div>
 
@@ -233,7 +277,7 @@ function selectYear(year) {
               v-for="y in years"
               :key="y"
               type="button"
-              class="cursor-pointer rounded-xl px-4 py-2 text-sm font-bold transition-all duration-200"
+              class="cursor-pointer rounded-xl px-4 py-2 text-sm font-bold tabular-nums transition-all duration-200"
               :class="y === selectedYear
                 ? 'bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-lg shadow-violet-200'
                 : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:ring-violet-300 hover:text-violet-700'"
@@ -250,23 +294,26 @@ function selectYear(year) {
         </div>
 
         <template v-else>
-          <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
             <div
               v-for="stat in stats"
               :key="stat.anahtar"
-              class="group relative overflow-hidden rounded-2xl bg-gradient-to-br p-5 shadow-md ring-1 transition duration-300 hover:-translate-y-1 hover:shadow-xl"
-              :class="[statMeta[stat.anahtar]?.gradient, statMeta[stat.anahtar]?.ring]"
+              class="rf-stat-card group relative overflow-hidden rounded-2xl bg-white/80 p-5 ring-1 ring-slate-100 transition duration-300 hover:-translate-y-1 hover:shadow-lg"
+              :style="{ '--rf-stat-accent': statMeta[stat.anahtar]?.accent, '--rf-stat-tint': statMeta[stat.anahtar]?.tint }"
             >
-              <div class="mb-3 flex items-center justify-between">
-                <span class="text-2xl">{{ statMeta[stat.anahtar]?.icon }}</span>
-                <span
-                  class="rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-400"
-                >
+              <span class="rf-stat-card-bar absolute inset-y-0 left-0 w-1" aria-hidden="true" />
+              <div class="mb-3 flex items-center justify-between pl-2">
+                <span class="rf-stat-icon flex h-9 w-9 items-center justify-center rounded-xl">
+                  <svg class="h-[18px] w-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+                    <path stroke-linecap="round" stroke-linejoin="round" :d="STAT_ICON_PATHS[stat.anahtar]" />
+                  </svg>
+                </span>
+                <span class="rounded-full bg-slate-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">
                   {{ selectedYear }}
                 </span>
               </div>
-              <p class="text-xs font-bold uppercase tracking-wide text-slate-500">{{ stat.etiket }}</p>
-              <p class="mt-2 text-2xl font-black text-slate-900" :class="statMeta[stat.anahtar]?.accent">
+              <p class="pl-2 text-xs font-bold uppercase tracking-wide text-slate-500">{{ stat.etiket }}</p>
+              <p class="mt-1 pl-2 font-display text-2xl font-black tabular-nums text-slate-900">
                 {{ formatStatValue(stat) }}
                 <span
                   v-if="stat.birim && stat.birim !== 'TL'"
@@ -282,11 +329,14 @@ function selectYear(year) {
           <div class="mt-8 rounded-2xl bg-white/70 p-5 ring-1 ring-slate-100 backdrop-blur-sm">
             <div class="mb-4 flex items-center justify-between">
               <div>
-                <h4 class="font-bold text-slate-900">Aylık Gelir Trendi</h4>
+                <h4 class="font-display font-bold text-slate-900">Aylık Gelir Trendi</h4>
                 <p class="text-xs text-slate-500">{{ selectedYear }} yılı kırılımı</p>
               </div>
+              <span class="rounded-full bg-slate-50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-slate-400 ring-1 ring-slate-100">
+                {{ currentPeriodLabel }}
+              </span>
             </div>
-            <RevenueBarChart :data="monthlyRevenue" :height="180" />
+            <RevenueLineChart :data="monthlyRevenue" :height="180" />
           </div>
         </template>
       </section>
@@ -300,6 +350,14 @@ function selectYear(year) {
   border: 1px solid rgba(255, 255, 255, 0.8);
 }
 
+/* Uygulamanın diğer yerlerinde de kullanılan diagonal-kesim imzası (bkz.
+   .rf-slant-top / .rf-login-hero) — jenerik bulanık baloncuklar yerine. */
+.rf-hero-slant {
+  clip-path: polygon(28% 0, 100% 0, 100% 100%, 0% 100%);
+  background: linear-gradient(160deg, color-mix(in srgb, var(--primary-color) 16%, transparent) 0%, color-mix(in srgb, var(--secondary-color) 10%, transparent) 100%);
+  pointer-events: none;
+}
+
 .rf-glass-card {
   background: rgba(255, 255, 255, 0.72);
   border: 1px solid rgba(255, 255, 255, 0.9);
@@ -307,5 +365,46 @@ function selectYear(year) {
     0 4px 24px rgba(99, 102, 241, 0.08),
     0 1px 3px rgba(15, 23, 42, 0.04);
   backdrop-filter: blur(16px);
+}
+
+/* --- Filo kartları: toplam = koyu imza kart, diğerleri donut segment
+   renkleriyle eşleşen sakin aksan kartları. --- */
+.rf-metric-card--solid {
+  background: linear-gradient(150deg, #0f172a 0%, #1e293b 100%);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.22);
+}
+
+.rf-metric-card--tinted {
+  background: color-mix(in srgb, var(--rf-metric-accent) 7%, white);
+  border: 1px solid color-mix(in srgb, var(--rf-metric-accent) 18%, white);
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.04);
+}
+
+.rf-metric-card--tinted::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--rf-metric-accent);
+}
+
+/* --- İstatistik kartları: nötr zemin, sol aksan çubuğu + tonlu ikon rozeti. --- */
+.rf-stat-card-bar {
+  background: var(--rf-stat-accent);
+  opacity: 0.85;
+}
+
+.rf-stat-icon {
+  background: var(--rf-stat-tint);
+  color: var(--rf-stat-accent);
+}
+
+.rf-hero-stat {
+  border: 1px solid rgba(255, 255, 255, 0.7);
+}
+
+.rf-live-dot--sm {
+  height: 0.4rem;
+  width: 0.4rem;
 }
 </style>

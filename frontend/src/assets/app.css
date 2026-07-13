@@ -10,6 +10,9 @@
   --color-brand-700: var(--color-brand-700, #1d4ed8);
   --color-brand-900: var(--secondary-color, #1e3a8a);
   --font-sans: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+  /* Manrope: başlıklar ve büyük rakamlar için — Inter'den ayrışan, biraz daha
+     karakterli bir görüntü yüzü. Gövde metni Inter'de kalır. */
+  --font-display: "Manrope", "Inter", system-ui, -apple-system, sans-serif;
 }
 
 :root {
@@ -34,6 +37,17 @@
     color: var(--color-slate-900);
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 }
 
@@ -372,6 +386,72 @@
     );
     opacity: 0.2;
     filter: blur(4px);
+  }
+
+  /* Login hero signature: a fine map-grid backdrop + a live route line that a
+     vehicle dot travels along — the panel's one visual "risk", tied directly
+     to the product's live-tracking feature rather than a decorative blob. */
+  .rf-login-mapgrid {
+    position: absolute;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+    background-size: 34px 34px;
+    -webkit-mask-image: radial-gradient(ellipse 85% 70% at 30% 40%, black 30%, transparent 78%);
+    mask-image: radial-gradient(ellipse 85% 70% at 30% 40%, black 30%, transparent 78%);
+  }
+
+  .rf-route-svg {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 40%;
+    overflow: visible;
+  }
+
+  .rf-route-path {
+    fill: none;
+    stroke: rgba(255, 255, 255, 0.22);
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-dasharray: 1 10;
+  }
+
+  .rf-route-stop {
+    fill: #fff;
+    opacity: 0.55;
+  }
+
+  .rf-route-dot {
+    fill: #fff;
+    filter: drop-shadow(0 0 6px color-mix(in srgb, var(--primary-color) 80%, white));
+  }
+
+  .rf-login-readout {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    border-radius: 9999px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    background: rgba(255, 255, 255, 0.08);
+    padding: 0.4rem 0.9rem 0.4rem 0.65rem;
+    font-family: var(--font-display);
+  }
+
+  .rf-login-readout-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 9999px;
+    background: #34d399;
+    box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.25);
+    animation: rf-pulse-dot 1.8s ease-in-out infinite;
+  }
+
+  @keyframes rf-pulse-dot {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.35); opacity: 0.7; }
   }
 
   .rf-trust-strip {

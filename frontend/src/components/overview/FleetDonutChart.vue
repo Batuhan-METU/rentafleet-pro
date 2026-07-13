@@ -52,7 +52,7 @@ const legend = computed(() =>
         class="absolute inset-0 m-auto flex flex-col items-center justify-center rounded-full bg-white shadow-inner"
         :style="{ width: `${size * 0.62}px`, height: `${size * 0.62}px` }"
       >
-        <span class="text-4xl font-black tracking-tight text-slate-900">{{ total }}</span>
+        <span class="font-display text-4xl font-black tabular-nums tracking-tight text-slate-900">{{ total }}</span>
         <span class="mt-0.5 text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Araç</span>
       </div>
     </div>
@@ -68,8 +68,8 @@ const legend = computed(() =>
           :style="{ backgroundColor: item.color }"
         />
         <span class="flex-1 text-sm font-semibold text-slate-700">{{ item.label }}</span>
-        <span class="text-sm font-black text-slate-900">{{ item.value }}</span>
-        <span class="w-10 text-right text-xs font-bold text-slate-400">{{ item.pct }}%</span>
+        <span class="font-display text-sm font-black tabular-nums text-slate-900">{{ item.value }}</span>
+        <span class="w-10 text-right text-xs font-bold tabular-nums text-slate-400">{{ item.pct }}%</span>
       </li>
     </ul>
   </div>

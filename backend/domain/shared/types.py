@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
 
-from backend.domain.shared.enums import RiskLevel, RuleEffect
+from backend.domain.shared.enums import RuleEffect
 
 
 @dataclass(frozen=True)

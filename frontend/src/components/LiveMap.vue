@@ -148,33 +148,36 @@ const lastUpdateText = computed(() =>
 <template>
   <div class="flex h-[calc(100vh-9rem)] flex-col gap-4">
     <!-- Üst bilgi şeridi -->
-    <div class="flex flex-wrap items-center gap-2">
-      <div class="rf-capsule !py-2 flex items-center gap-2">
+    <div class="rf-glass-strong flex flex-wrap items-center gap-2 rounded-3xl p-3">
+      <div class="flex items-center gap-2 rounded-2xl bg-emerald-50 px-4 py-2.5">
         <span class="rf-live-dot" />
-        <span class="text-sm font-bold text-slate-800">Canlı</span>
+        <span class="text-sm font-black text-emerald-700">Canlı</span>
       </div>
 
-      <div class="rf-capsule !py-2">
-        <span class="text-sm text-slate-500/80">Takip:</span>
-        <span class="ml-1 text-sm font-black text-slate-900">{{ trackable.length }}</span>
+      <div class="rounded-2xl bg-slate-900/[0.03] px-4 py-2">
+        <p class="text-[10px] font-bold uppercase tracking-wide text-slate-400">Takip</p>
+        <p class="text-xl font-black leading-tight text-slate-900">{{ trackable.length }}</p>
       </div>
 
-      <div class="rf-capsule !py-2">
-        <span class="text-sm text-slate-500/80">Hareket:</span>
-        <span class="ml-1 text-sm font-black text-emerald-600">{{ movingCount }}</span>
+      <div class="rounded-2xl bg-emerald-50 px-4 py-2">
+        <p class="text-[10px] font-bold uppercase tracking-wide text-emerald-700/70">Hareket</p>
+        <p class="text-xl font-black leading-tight text-emerald-700">{{ movingCount }}</p>
       </div>
 
-      <div class="rf-capsule !py-2">
-        <span class="text-sm text-slate-500/80">Kirada:</span>
-        <span class="ml-1 text-sm font-black text-blue-600">{{ rentedCount }}</span>
+      <div class="rounded-2xl bg-blue-50 px-4 py-2">
+        <p class="text-[10px] font-bold uppercase tracking-wide text-blue-700/70">Kirada</p>
+        <p class="text-xl font-black leading-tight text-blue-700">{{ rentedCount }}</p>
       </div>
 
       <div
-        class="rf-capsule !py-2"
-        :class="criticalCount ? 'ring-1 ring-red-300/40' : ''"
+        class="rounded-2xl px-4 py-2 transition-colors"
+        :class="criticalCount ? 'bg-red-50 ring-1 ring-red-300/50' : 'bg-slate-900/[0.03]'"
       >
-        <span class="text-sm text-slate-500/80">Kritik:</span>
-        <span class="ml-1 text-sm font-black" :class="criticalCount ? 'text-red-700' : 'text-slate-900'">{{ criticalCount }}</span>
+        <p class="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide" :class="criticalCount ? 'text-red-700/80' : 'text-slate-400'">
+          <span v-if="criticalCount" class="h-1.5 w-1.5 rounded-full bg-red-600 animate-pulse" />
+          Kritik
+        </p>
+        <p class="text-xl font-black leading-tight" :class="criticalCount ? 'text-red-700' : 'text-slate-900'">{{ criticalCount }}</p>
       </div>
 
       <div class="ml-auto flex items-center gap-4">
@@ -184,7 +187,7 @@ const lastUpdateText = computed(() =>
           <span class="flex items-center gap-1.5"><span class="h-3 w-3 rounded-full bg-amber-500"></span>{{ STATUS.MAINTENANCE.label }}</span>
           <span class="flex items-center gap-1.5"><span class="h-3 w-3 rounded-full bg-red-800"></span>Kritik</span>
         </div>
-        <span class="text-xs text-slate-400">Son güncelleme: {{ lastUpdateText }}</span>
+        <span class="text-xs font-medium text-slate-400">Son güncelleme: {{ lastUpdateText }}</span>
       </div>
     </div>
 

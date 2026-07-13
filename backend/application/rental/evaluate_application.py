@@ -6,12 +6,12 @@ from datetime import datetime
 from typing import Any
 
 from django.db import transaction
-from django.utils import timezone
 
 from backend.application.customer.snapshots import build_customer_snapshot, ensure_customer_profiles
-from backend.application.decision.core import evaluate_customer_risk
+from backend.application.driver.persist_risk import persist_driver_risk_result
 from backend.apps.customer_profiles.models import Driver
 from backend.apps.reservations.choices import RentalStatus
+from backend.apps.risk_checks.evaluation import evaluate_customer_risk
 from backend.apps.risk_checks.models import (
     CustomerRiskSnapshot,
     DecisionStep,
@@ -89,23 +89,27 @@ class RentalApplicationService:
             application=application,
             risk_score=bundle.risk_result.score or 0,
             risk_level=bundle.risk_result.level or "MEDIUM",
-            factor_breakdown=bundle.audit,
+            factor_breakdown={
+                "audit": bundle.audit,
+                "eligible_vehicles": list(bundle.vehicles),
+                "deposit_amount": bundle.deposit,
+            },
         )
 
-        driver.current_risk_score = bundle.risk_result.score
-        if bundle.risk_result.warnings:
-            driver.risk_note = "; ".join(bundle.risk_result.warnings[:3])
-        driver.save(update_fields=["current_risk_score", "risk_note", "updated_at"])
+        persist_driver_risk_result(driver, bundle)
 
         application.risk_score = bundle.risk_result.score
         application.risk_level = bundle.risk_result.level or ""
         application.status = (
             RentalApplicationStatus.REJECTED
-            if not bundle.risk_result.approved
+            if not bundle.approved
             else RentalApplicationStatus.EVALUATED
         )
-        if not bundle.risk_result.approved:
-            application.rejection_reason = "; ".join(bundle.risk_result.blockers)
+        if not bundle.approved:
+            blockers = bundle.risk_result.blockers
+            if not blockers and not bundle.vehicles:
+                blockers = ("Risk seviyesine uygun araç segmenti bulunamadı.",)
+            application.rejection_reason = "; ".join(blockers)
         application.save(
             update_fields=["risk_score", "risk_level", "status", "rejection_reason", "updated_at"]
         )
@@ -147,9 +151,6 @@ class RentalApplicationService:
         )
 
     def serialize_evaluation(self, result: EvaluateRentalResult, application: RentalApplication) -> dict[str, Any]:
-        # evaluate() sırasında hesaplanan/loglanan liste yeniden kullanılır;
-        # tekrar recommend_vehicles() çağrılırsa audit log ile API yanıtı
-        # araç durumu bu ikisi arasında değişmişse farklılaşabilirdi.
         vehicles = list(result.vehicles)
 
         return {

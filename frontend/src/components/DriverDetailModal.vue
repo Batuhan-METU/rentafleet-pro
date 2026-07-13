@@ -46,7 +46,9 @@ const vehicles = computed(() =>
 const canAutoReserve = computed(() =>
   readyForDriverPick.value
   && !rental.value
-  && !driver.value?.is_blacklisted,
+  && !driver.value?.is_blacklisted
+  && risk.value?.onaylandi
+  && (!workflow.vehicleId || filteredVehicles.value.some((v) => v.vehicle_id === workflow.vehicleId)),
 )
 
 const autoReserveError = ref('')
@@ -81,7 +83,7 @@ async function autoReserve() {
       vehicle_id: workflow.vehicleId,
       pickup_date: workflow.pickupDate,
       dropoff_date: workflow.dropoffDate,
-      quoted_total: workflow.agreedPrice ?? null,
+      daily_rate: workflow.agreedDailyRate ?? null,
       deposit_amount: workflow.depositAmount ?? null,
     })
     workflow.clear()
@@ -109,6 +111,7 @@ function manualReserve() {
   if (!workflow.pickupDate) {
     workflow.setPricing({
       agreedPrice: workflow.agreedPrice,
+      agreedDailyRate: workflow.agreedDailyRate,
       pickupDate: addDays(new Date(), 1),
       dropoffDate: addDays(new Date(), 4),
     })

@@ -6,7 +6,6 @@ from decimal import Decimal
 
 from backend.domain.rule_engine.engine import RuleDefinitionData
 from backend.domain.shared.enums import RuleEffect
-from backend.domain.shared.types import CustomerSnapshot
 
 MIN_DRIVER_AGE = 21
 MAX_DRIVER_AGE = 70
