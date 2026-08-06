@@ -6,40 +6,33 @@ OpenAI streaming veya simüle akışlı Türkçe fallback yanıtı üretir.
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import re
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass, field
-from typing import Iterator
 
 from django.conf import settings
 
+from backend.apps.vehicles.models import Vehicle
 from backend.infrastructure.services.analytics.analytics_service import get_fleet_analytics
-from backend.infrastructure.services.analytics.maintenance_service import STATUS_CRITICAL, get_maintenance_alerts
-from backend.infrastructure.services.pricing.pricing_service import (
-    BASE_PRICE,
-    HIGH_DEMAND_MULTIPLIER,
-    HIGH_MILEAGE_KM,
-    HIGH_MILEAGE_PENALTY,
-    HIGH_OCCUPANCY_THRESHOLD,
-    LOW_DEMAND_MULTIPLIER,
-    LOW_OCCUPANCY_THRESHOLD,
+from backend.infrastructure.services.analytics.maintenance_service import (
+    STATUS_CRITICAL,
+    get_maintenance_alerts,
 )
 from backend.infrastructure.services.analytics.scoring_service import SAFE_DRIVER_THRESHOLD
-from backend.apps.vehicles.models import Vehicle
+from backend.infrastructure.services.cost_calculation.floor_price_service import build_floor_price
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT_TR = (
-    "Sen RentA-Fleet PRO sisteminin kıdemli, veri odaklı AI Filo Danışmanısın. "
-    "Karşındaki kişi bir Araç Kiralama Şirketi Müdürüdür. "
-    "Cevapların her zaman profesyonel, Türkçe, kısa, net ve aksiyona dökülebilir olmalıdır. "
-    "Yalnızca sana verilen anlık filo bağlamındaki sayılara ve listelere dayan; "
-    "uydurma istatistik veya plaka üretme. "
-    "Yanıt formatı: bölüm başlıklarını **kalın** yaz; somut önerileri `- ` ile madde listesi olarak ver."
-)
+# --- Talep/fiyat bağlamı eşikleri ---------------------------------------
+# Not: bu eşikler yalnızca AI bağlamındaki "talep durumu" etiketini
+# (yüksek/düşük/normal) belirler; gerçek fiyat artık gerçek maliyet
+# motorundan (cost_calculation) geliyor.
+HIGH_OCCUPANCY_THRESHOLD: float = 80.0
+LOW_OCCUPANCY_THRESHOLD: float = 30.0
+HIGH_MILEAGE_KM: int = 100_000
 
 FALLBACK_STREAM_DELAY_SEC = 0.028
 
@@ -68,12 +61,27 @@ class FleetContext:
     top_maintenance_plates: list[str] = field(default_factory=list)
 
 
-def _demand_state(occupancy: float) -> tuple[str, float]:
+def _demand_state(occupancy: float) -> str:
     if occupancy > HIGH_OCCUPANCY_THRESHOLD:
-        return "yüksek", HIGH_DEMAND_MULTIPLIER
+        return "yüksek"
     if occupancy < LOW_OCCUPANCY_THRESHOLD:
-        return "düşük", LOW_DEMAND_MULTIPLIER
-    return "normal", 1.0
+        return "düşük"
+    return "normal"
+
+
+def _average_daily_floor_price(vehicle_qs) -> float:
+    """Filodaki hesaplanabilir araçların ortalama günlük kurtaran fiyatı (§6).
+
+    Maliyet verisi eksik olan araçlar (§1.5 — Bilinmiyor ≠ Sıfır) ortalamaya
+    dahil edilmez; hiçbiri hesaplanamıyorsa 0.0 döner (diğer FleetContext
+    alanlarıyla aynı "veri yoksa 0.0" konvansiyonu).
+    """
+    prices = [
+        float(floor.daily_floor_price)
+        for vehicle in vehicle_qs
+        if (floor := build_floor_price(vehicle)).daily_floor_price is not None
+    ]
+    return round(sum(prices) / len(prices), 2) if prices else 0.0
 
 
 def _build_fleet_context(company_id: int) -> FleetContext:
@@ -86,10 +94,8 @@ def _build_fleet_context(company_id: int) -> FleetContext:
 
     vehicle_qs = Vehicle.objects.filter(company_id=company_id)
     high_mileage = vehicle_qs.filter(current_km__gt=HIGH_MILEAGE_KM).count()
-    demand_state, multiplier = _demand_state(analytics.occupancy_rate)
-    avg_price = (BASE_PRICE * multiplier) - (
-        HIGH_MILEAGE_PENALTY * high_mileage / max(analytics.total, 1)
-    )
+    demand_state = _demand_state(analytics.occupancy_rate)
+    avg_price = _average_daily_floor_price(vehicle_qs)
 
     risky_count = sum(
         1 for d in analytics.lowest_drivers if d.get("skor", 100) < SAFE_DRIVER_THRESHOLD
@@ -150,53 +156,18 @@ def _context_summary_text(ctx: FleetContext) -> str:
     )
 
 
-def _openai_messages(user_query: str, context_text: str) -> list[dict[str, str]]:
-    return [
-        {"role": "system", "content": SYSTEM_PROMPT_TR},
-        {
-            "role": "user",
-            "content": (
-                f"{context_text}\n\n"
-                f"MÜDÜRÜN SORUSU: {user_query}\n\n"
-                "Yukarıdaki bağlamı kullanarak kısa ve aksiyon odaklı yanıt ver."
-            ),
-        },
-    ]
-
-
 def _openai_client():
     from openai import OpenAI
 
     api_key = os.getenv("OPENAI_API_KEY") or getattr(settings, "OPENAI_API_KEY", "")
     if not api_key:
         return None
-    return OpenAI(api_key=api_key)
-
-
-def _try_openai_stream(user_query: str, context_text: str) -> Iterator[str] | None:
-    """OpenAI stream=True; başlatma hatasında None."""
-    client = _openai_client()
-    if client is None:
-        return None
-
-    try:
-        stream = client.chat.completions.create(
-            model=os.getenv("OPENAI_MODEL", getattr(settings, "OPENAI_MODEL", "gpt-4o-mini")),
-            messages=_openai_messages(user_query, context_text),
-            temperature=0.35,
-            stream=True,
-        )
-    except Exception as exc:
-        logger.warning("OpenAI stream başlatılamadı, fallback'e geçiliyor: %s", exc)
-        return None
-
-    def _generator() -> Iterator[str]:
-        for event in stream:
-            delta = event.choices[0].delta.content
-            if delta:
-                yield delta
-
-    return _generator()
+    # Açık bir timeout olmadan SDK'nın varsayılanı (dakikalarca) kullanılırdı
+    # — OpenAI yavaş/asılı kalırsa bu istek için ayrılmış senkron Django
+    # worker'ı gereğinden çok uzun süre kilitlenirdi (bkz. üretim sertleştirme
+    # denetimi). Çağıranın kendi hata yakalaması zaten deterministik,
+    # veriye dayalı bir yedeğe (fallback) düşüyor.
+    return OpenAI(api_key=api_key, timeout=20.0, max_retries=1)
 
 
 _TR_ASCII = str.maketrans("çğıöşüâî", "cgiosuai")
@@ -298,39 +269,3 @@ def _simulate_stream(text: str, *, delay: float = FALLBACK_STREAM_DELAY_SEC) -> 
         time.sleep(delay)
 
 
-def stream_ai_fleet_advice(
-    user_query: str,
-    *,
-    company_id: int,
-) -> Iterator[str]:
-    """Kullanıcı sorusuna stream chunk'ları üretir."""
-    query = (user_query or "").strip()
-    context = _build_fleet_context(company_id=company_id)
-    context_text = _context_summary_text(context)
-
-    openai_stream = _try_openai_stream(query, context_text)
-    if openai_stream is not None:
-        received = False
-        for chunk in openai_stream:
-            received = True
-            yield chunk
-        if received:
-            return
-
-    yield from _simulate_stream(_fallback_response(query, context))
-
-
-def stream_ai_fleet_advice_sse(
-    user_query: str,
-    *,
-    company_id: int,
-) -> Iterator[str]:
-    """SSE formatında satırlar üretir."""
-    try:
-        for chunk in stream_ai_fleet_advice(user_query, company_id=company_id):
-            payload = json.dumps({"content": chunk}, ensure_ascii=False)
-            yield f"data: {payload}\n\n"
-        yield f"data: {json.dumps({'done': True})}\n\n"
-    except Exception as exc:
-        logger.exception("AI danışman stream hatası")
-        yield f"data: {json.dumps({'error': str(exc)}, ensure_ascii=False)}\n\n"

@@ -1,5 +1,7 @@
 /** Şirket slug — localStorage + host subdomain. */
-export const COMPANY_SLUG_KEY = 'rf_company_slug'
+import { COMPANY_SLUG_KEY } from './storageKeys.js'
+
+export { COMPANY_SLUG_KEY }
 
 export function inferCompanySlug(username = '') {
   return String(username).trim().toLowerCase().split('_')[0] || null

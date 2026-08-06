@@ -4,6 +4,7 @@ import { storeToRefs } from 'pinia'
 import { useAuthStore } from '../stores/authStore.js'
 import { useUiStore } from '../stores/uiStore.js'
 import AppSidebar from '../components/AppSidebar.vue'
+import NotificationBell from '../components/NotificationBell.vue'
 
 const auth = useAuthStore()
 const ui = useUiStore()
@@ -14,10 +15,13 @@ const PAGE_META = {
   vehicles: { title: 'Araçlar', subtitle: 'Tüm filo araçlarını görüntüleyin ve filtreleyin' },
   drivers: { title: 'Sürücüler', subtitle: 'Müşteri sürücü profilleri, skorlar ve kiralama geçmişi' },
   live: { title: 'Canlı Takip', subtitle: 'Araçlarınızı harita üzerinde gerçek zamanlı izleyin' },
-  maintenance: { title: 'Bakım Merkezi', subtitle: 'Öngörücü bakım uyarıları ve araç yıpranma durumu' },
+  maintenance: { title: 'Bakım Merkezi', subtitle: 'Öngörücü bakım uyarıları ve kalan kilometre takibi' },
   pricing: { title: 'Fiyatlandırma', subtitle: 'Piyasa fiyatları + maliyet tabanlı fiyat önerisi' },
-  reservations: { title: 'Rezervasyonlar', subtitle: 'Araç–sürücü atamaları ve kiralama kayıtları' },
-  settings: { title: 'Ayarlar', subtitle: 'Şirket profili, marka ve personel yönetimi' },
+  rentals: { title: 'Kiralamalar', subtitle: 'Araç–sürücü atamaları ve kiralama kayıtları' },
+  loans: { title: 'Krediler', subtitle: 'Araç filosunu finanse eden kredi tanımları' },
+  'loan-detail': { title: 'Kredi Detayı', subtitle: '' },
+  'vehicle-detail': { title: 'Araç Detayı', subtitle: 'Aracın tüm bilgilerini görüntüleyin ve yönetin' },
+  'driver-detail': { title: 'Sürücü Detayı', subtitle: 'Sürücü bilgileri, risk skoru ve kiralama geçmişi' },
 }
 
 const pageMeta = computed(() => PAGE_META[activeView.value] ?? PAGE_META.overview)
@@ -57,6 +61,7 @@ onBeforeUnmount(() => {
           <p v-if="pageMeta.subtitle" class="rf-section-sub mt-1 leading-snug">{{ pageMeta.subtitle }}</p>
         </div>
         <div class="flex flex-wrap items-center justify-end gap-3">
+          <NotificationBell />
           <slot name="actions" :active-view="activeView" :navigate="navigate" />
         </div>
       </header>

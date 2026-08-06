@@ -1,6 +1,5 @@
 import { defineStore } from 'pinia'
-
-const STORAGE_KEY = 'rf_rental_workflow'
+import { RENTAL_WORKFLOW_KEY as STORAGE_KEY } from '../utils/storageKeys.js'
 
 function defaultState() {
   return {
@@ -11,6 +10,8 @@ function defaultState() {
     agreedDailyRate: null,
     pickupDate: null,
     dropoffDate: null,
+    pickupTime: '10:00',
+    dropoffTime: '10:00',
     driverId: null,
     driverName: null,
     riskApproved: false,
@@ -30,7 +31,7 @@ function loadPersisted() {
   }
 }
 
-/** Bayi kiralama süreci: fiyatlandırma → sürücü → rezervasyon */
+/** Bayi kiralama süreci: fiyatlandırma → sürücü → kiralama */
 export const useRentalWorkflowStore = defineStore('rentalWorkflow', {
   state: () => loadPersisted() ?? defaultState(),
 
@@ -40,7 +41,7 @@ export const useRentalWorkflowStore = defineStore('rentalWorkflow', {
       if (state.agreedPrice == null) return 'pricing'
       if (!state.driverId) return 'driver'
       if (!state.riskApproved) return 'risk'
-      return 'reservation'
+      return 'rental'
     },
     progressStep() {
       const s = this.step
@@ -52,15 +53,10 @@ export const useRentalWorkflowStore = defineStore('rentalWorkflow', {
         pricing: 'Fiyatlandırma',
         driver: 'Sürücü Bilgileri',
         risk: 'Risk Değerlendirmesi',
-        reservation: 'Rezervasyon',
+        rental: 'Kiralama',
       }
       return labels[this.step] ?? ''
     },
-    canCreateReservation: (state) =>
-      state.vehicleId
-      && state.driverId
-      && state.pickupDate
-      && state.dropoffDate,
     readyForDriverPick: (state) =>
       Boolean(
         state.vehicleId
@@ -83,6 +79,8 @@ export const useRentalWorkflowStore = defineStore('rentalWorkflow', {
           agreedDailyRate: this.agreedDailyRate,
           pickupDate: this.pickupDate,
           dropoffDate: this.dropoffDate,
+          pickupTime: this.pickupTime,
+          dropoffTime: this.dropoffTime,
           driverId: this.driverId,
           driverName: this.driverName,
           riskApproved: this.riskApproved,
@@ -106,13 +104,23 @@ export const useRentalWorkflowStore = defineStore('rentalWorkflow', {
     },
 
     /** Müşteri fiyatı kabul etti — tek adımda süreci başlat */
-    acceptPricingOffer({ vehicle, agreedPrice, agreedDailyRate = null, pickupDate, dropoffDate }) {
+    acceptPricingOffer({
+      vehicle,
+      agreedPrice,
+      agreedDailyRate = null,
+      pickupDate,
+      dropoffDate,
+      pickupTime = '10:00',
+      dropoffTime = '10:00',
+    }) {
       this.vehicleId = vehicle.id
       this.vehicleLabel = `${vehicle.plate_number} — ${vehicle.brand} ${vehicle.model}`
       this.agreedPrice = agreedPrice
       this.agreedDailyRate = agreedDailyRate
       this.pickupDate = pickupDate
       this.dropoffDate = dropoffDate
+      this.pickupTime = pickupTime
+      this.dropoffTime = dropoffTime
       this.driverId = null
       this.driverName = null
       this.riskApproved = false
@@ -127,11 +135,20 @@ export const useRentalWorkflowStore = defineStore('rentalWorkflow', {
       this._persist()
     },
 
-    setPricing({ agreedPrice, agreedDailyRate = null, pickupDate, dropoffDate }) {
+    setPricing({
+      agreedPrice,
+      agreedDailyRate = null,
+      pickupDate,
+      dropoffDate,
+      pickupTime = '10:00',
+      dropoffTime = '10:00',
+    }) {
       this.agreedPrice = agreedPrice
       this.agreedDailyRate = agreedDailyRate
       this.pickupDate = pickupDate
       this.dropoffDate = dropoffDate
+      this.pickupTime = pickupTime
+      this.dropoffTime = dropoffTime
       this.active = true
       this._persist()
     },
@@ -151,9 +168,14 @@ export const useRentalWorkflowStore = defineStore('rentalWorkflow', {
         !risk?.blokajlar?.length && (risk?.uygun_araclar?.length > 0)
       )
       this.driverId = driver.id
-      this.driverName = driver.ad_soyad ?? driver.full_name ?? ''
+      this.driverName = driver.full_name ?? ''
       this.riskApproved = approved
-      this.depositAmount = risk?.depozito ? Number(risk.depozito) : null
+      // Depozito, aracın fiyatı değil ANLAŞILAN KİRALAMA FİYATININ bir
+      // yüzdesidir — backend yalnızca oranı (depozito_orani) döner, tutar
+      // burada fiyatlandırma ekranında kabul edilen fiyat üzerinden hesaplanır.
+      this.depositAmount = (risk?.depozito_orani != null && this.agreedPrice != null)
+        ? Number(risk.depozito_orani) * Number(this.agreedPrice)
+        : null
       if (!this.active) this.active = true
       this._persist()
     },

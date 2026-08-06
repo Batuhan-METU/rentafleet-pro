@@ -1,14 +1,21 @@
-/** SSE tabanlı AI danışman stream istemcisi. */
+/** SSE tabanlı AI asistanı stream istemcisi + mutasyon onayı. */
 import apiClient from './api.js'
+import { TOKEN_KEY } from '../utils/storageKeys.js'
 
 const API_BASE = apiClient.defaults.baseURL
 
 /**
  * @param {string} query
- * @param {{ onChunk: (text: string) => void, onDone?: () => void, onError?: (msg: string) => void }} handlers
+ * @param {Array<{role: 'user'|'ai', text: string}>} history Önceki turlar (en fazla ~12 tanesi gönderilir).
+ * @param {{
+ *   onChunk: (text: string) => void,
+ *   onConfirmation?: (confirmation: {action_id: string, tool: string, summary: string}) => void,
+ *   onDone?: () => void,
+ *   onError?: (msg: string) => void,
+ * }} handlers
  */
-export async function streamAiConsult(query, { onChunk, onDone, onError }) {
-  const token = localStorage.getItem('rf_token')
+export async function streamAiConsult(query, history, { onChunk, onConfirmation, onDone, onError }) {
+  const token = localStorage.getItem(TOKEN_KEY)
   const response = await fetch(`${API_BASE}ai/consult/`, {
     method: 'POST',
     headers: {
@@ -16,7 +23,7 @@ export async function streamAiConsult(query, { onChunk, onDone, onError }) {
       Accept: 'text/event-stream',
       ...(token ? { Authorization: `Token ${token}` } : {}),
     },
-    body: JSON.stringify({ query }),
+    body: JSON.stringify({ query, history }),
   })
 
   if (!response.ok) {
@@ -69,6 +76,9 @@ export async function streamAiConsult(query, { onChunk, onDone, onError }) {
         onDone?.()
         return
       }
+      if (payload.confirmation) {
+        onConfirmation?.(payload.confirmation)
+      }
       if (payload.content) {
         onChunk(payload.content)
       }
@@ -76,4 +86,14 @@ export async function streamAiConsult(query, { onChunk, onDone, onError }) {
   }
 
   onDone?.()
+}
+
+/**
+ * Bir AI onay kartındaki mutasyon eylemini gerçekten çalıştırır.
+ * @param {string} actionId
+ * @returns {Promise<object>} Eylemin sonucu (ör. oluşturulan kiralama).
+ */
+export async function confirmAiAction(actionId) {
+  const response = await apiClient.post(`ai/actions/${actionId}/confirm/`)
+  return response.data
 }

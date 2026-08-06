@@ -1,9 +1,13 @@
 <script setup>
 // Araç teslim alma modalı — erken/geç/zamanında farkını canlı önizler,
-// onaylanınca rezervasyonu kapatıp aracı serbest bırakır.
+// onaylanınca kiralamayı kapatıp aracı serbest bırakır.
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRentalStore } from '../stores/rentalStore.js'
 import { formatTL } from '../utils/format.js'
+import { getApiErrorMessage } from '../utils/apiError.js'
+import { useModalLifecycle } from '../composables/useModalLifecycle.js'
+import DatePicker from './vehicle-form/DatePicker.vue'
+import TimePicker from './vehicle-form/TimePicker.vue'
 
 const props = defineProps({
   rental: { type: Object, required: true },
@@ -12,43 +16,48 @@ const emit = defineEmits(['close', 'returned'])
 
 const rentalStore = useRentalStore()
 
-function nowLocalInputValue() {
-  const d = new Date()
-  d.setMinutes(d.getMinutes() - d.getTimezoneOffset())
-  return d.toISOString().slice(0, 16)
+function pad(n) {
+  return String(n).padStart(2, '0')
 }
 
-const actualReturnAt = ref(nowLocalInputValue())
+const now = new Date()
+const actualReturnDate = ref(`${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`)
+const actualReturnTime = ref(`${pad(now.getHours())}:${pad(now.getMinutes())}`)
 const notes = ref('')
 const preview = ref(null)
 const previewError = ref('')
 const submitError = ref('')
 
+const actualReturnAtIso = computed(() => {
+  if (!actualReturnDate.value || !actualReturnTime.value) return null
+  return new Date(`${actualReturnDate.value}T${actualReturnTime.value}:00`).toISOString()
+})
+
 let debounceTimer = null
 
 async function refreshPreview() {
-  if (!actualReturnAt.value) return
+  if (!actualReturnAtIso.value) return
   previewError.value = ''
   try {
     preview.value = await rentalStore.previewReturn(props.rental.id, {
-      actual_return_at: new Date(actualReturnAt.value).toISOString(),
+      actual_return_at: actualReturnAtIso.value,
       notes: notes.value,
     })
   } catch (err) {
     preview.value = null
-    previewError.value = err?.response?.data?.error ?? 'Önizleme hesaplanamadı.'
+    previewError.value = getApiErrorMessage(err, 'Önizleme hesaplanamadı.')
   }
 }
 
-watch([actualReturnAt, notes], () => {
+watch([actualReturnDate, actualReturnTime, notes], () => {
   clearTimeout(debounceTimer)
   debounceTimer = window.setTimeout(refreshPreview, 400)
 })
 
 const previewTone = computed(() => {
   if (!preview.value) return 'neutral'
-  if (preview.value.durum === 'EARLY') return 'refund'
-  if (preview.value.durum === 'LATE') return 'charge'
+  if (preview.value.status === 'EARLY') return 'refund'
+  if (preview.value.status === 'LATE') return 'charge'
   return 'neutral'
 })
 
@@ -58,29 +67,23 @@ async function confirmReturn() {
   submitError.value = ''
   try {
     await rentalStore.returnRental(props.rental.id, {
-      actual_return_at: new Date(actualReturnAt.value).toISOString(),
+      actual_return_at: actualReturnAtIso.value,
       notes: notes.value,
     })
     emit('returned')
     emit('close')
   } catch (err) {
-    submitError.value = err?.response?.data?.error ?? 'Teslim alma işlemi tamamlanamadı.'
+    submitError.value = getApiErrorMessage(err, 'Teslim alma işlemi tamamlanamadı.')
   }
 }
 
-function onKeydown(event) {
-  if (event.key === 'Escape') emit('close')
-}
+useModalLifecycle(() => emit('close'))
 
 onMounted(() => {
-  document.addEventListener('keydown', onKeydown)
-  document.body.style.overflow = 'hidden'
   refreshPreview()
 })
 
 onBeforeUnmount(() => {
-  document.removeEventListener('keydown', onKeydown)
-  document.body.style.overflow = ''
   clearTimeout(debounceTimer)
 })
 </script>
@@ -100,7 +103,7 @@ onBeforeUnmount(() => {
         <header class="flex items-start justify-between gap-4 px-6 pt-5">
           <div>
             <h2 class="text-lg font-black text-slate-900">Araç Teslim Al</h2>
-            <p class="mt-0.5 text-sm text-slate-500">{{ rental.plaka }} — {{ rental.marka_model }}</p>
+            <p class="mt-0.5 text-sm text-slate-500">{{ rental.plate_number }} — {{ rental.brand_model }}</p>
           </div>
           <button
             type="button"
@@ -118,8 +121,11 @@ onBeforeUnmount(() => {
             <label class="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">
               Fiili Teslim Zamanı
             </label>
-            <input v-model="actualReturnAt" type="datetime-local" class="rf-input" />
-            <p class="mt-1 text-xs text-slate-400">Sözleşme dönüş tarihi: {{ rental.bitis || rental.ended_at }}</p>
+            <div class="flex gap-2">
+              <DatePicker v-model="actualReturnDate" />
+              <TimePicker v-model="actualReturnTime" />
+            </div>
+            <p class="mt-1 text-xs text-slate-400">Sözleşme dönüş tarihi: {{ rental.ended_at }}</p>
           </div>
 
           <div>
@@ -139,9 +145,9 @@ onBeforeUnmount(() => {
               <p class="text-sm font-semibold text-rose-700">{{ previewError }}</p>
             </template>
             <template v-else-if="preview">
-              <p class="text-sm font-bold text-slate-800">{{ preview.mesaj }}</p>
-              <p v-if="Number(preview.fark_tutari) !== 0" class="mt-1 font-display text-2xl font-black tabular-nums" :class="previewTone === 'refund' ? 'text-emerald-700' : 'text-rose-700'">
-                {{ previewTone === 'refund' ? '−' : '+' }}{{ formatTL(Math.abs(Number(preview.fark_tutari))) }}
+              <p class="text-sm font-bold text-slate-800">{{ preview.message }}</p>
+              <p v-if="Number(preview.price_difference) !== 0" class="mt-1 font-display text-2xl font-black tabular-nums" :class="previewTone === 'refund' ? 'text-emerald-700' : 'text-rose-700'">
+                {{ previewTone === 'refund' ? '−' : '+' }}{{ formatTL(Math.abs(Number(preview.price_difference))) }}
               </p>
             </template>
             <template v-else>

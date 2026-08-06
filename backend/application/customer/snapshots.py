@@ -5,16 +5,15 @@ from __future__ import annotations
 from datetime import date
 
 from backend.application.customer.rental_stats import sync_rental_history_stats
-from backend.domain.shared.types import CustomerSnapshot
 from backend.apps.customer_profiles.models import Driver
+from backend.apps.rentals.models import RentalStatus
 from backend.apps.risk_checks.models import (
     CustomerFinancialProfile,
     CustomerIdentityProfile,
     CustomerLicenseProfile,
     CustomerRentalHistoryStats,
 )
-from backend.apps.reservations.models import RentalStatus
-
+from backend.domain.shared.types import CustomerSnapshot
 
 
 def _age_years(birth_date: date) -> int:

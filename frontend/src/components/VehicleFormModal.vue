@@ -1,27 +1,17 @@
 <script setup>
 // Araç ekleme / düzenleme modalı (Araçlar sayfasından).
-import { onMounted, onBeforeUnmount } from 'vue'
-import VehicleFinanceForm from './finance/VehicleFinanceForm.vue'
+import { useModalLifecycle } from '../composables/useModalLifecycle.js'
+import VehicleWizardForm from './vehicle-form/VehicleWizardForm.vue'
 
 defineProps({
   editVehicle: { type: Object, default: null },
   editProfile: { type: Object, default: null },
+  editPolicies: { type: Array, default: () => [] },
+  editRegistrationDetail: { type: Object, default: null },
 })
 const emit = defineEmits(['close', 'saved'])
 
-function onKeydown(event) {
-  if (event.key === 'Escape') emit('close')
-}
-
-onMounted(() => {
-  document.addEventListener('keydown', onKeydown)
-  document.body.style.overflow = 'hidden'
-})
-
-onBeforeUnmount(() => {
-  document.removeEventListener('keydown', onKeydown)
-  document.body.style.overflow = ''
-})
+useModalLifecycle(() => emit('close'))
 </script>
 
 <template>
@@ -30,7 +20,7 @@ onBeforeUnmount(() => {
       <div class="absolute inset-0 bg-slate-900/50" aria-hidden="true" @click="emit('close')" />
 
       <div
-        class="relative z-10 flex max-h-[min(90vh,100dvh-2rem)] w-full max-w-5xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl"
+        class="relative z-10 flex h-[min(92vh,100dvh-2rem)] w-full max-w-7xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl"
         role="dialog"
         aria-modal="true"
       >
@@ -55,10 +45,12 @@ onBeforeUnmount(() => {
           </button>
         </header>
 
-        <div class="flex-1 overflow-y-auto overscroll-contain px-6 py-5">
-          <VehicleFinanceForm
+        <div class="flex min-h-0 flex-1 flex-col px-6 py-5">
+          <VehicleWizardForm
             :edit-vehicle="editVehicle"
             :edit-profile="editProfile"
+            :edit-policies="editPolicies"
+            :edit-registration-detail="editRegistrationDetail"
             @saved="(v) => emit('saved', v)"
             @cancel="emit('close')"
           />

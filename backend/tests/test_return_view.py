@@ -7,36 +7,13 @@ from decimal import Decimal
 
 import pytest
 from rest_framework import status
-from rest_framework.test import APIClient
 
-from backend.apps.companies.models import Company, CustomUser, UserRole
+from backend.apps.companies.models import Company
 from backend.apps.customer_profiles.models import Driver
-from backend.apps.reservations.models import Rental, RentalStatus, ReturnStatus
+from backend.apps.rentals.models import Rental, RentalStatus, ReturnStatus
 from backend.apps.vehicles.models import Vehicle, VehicleStatus
 
 pytestmark = pytest.mark.django_db
-
-
-@pytest.fixture
-def company() -> Company:
-    return Company.objects.create(name="test-tenant", tax_number="8880001111")
-
-
-@pytest.fixture
-def manager(company: Company) -> CustomUser:
-    return CustomUser.objects.create_user(
-        username="test_mudur_return",
-        password="test-pass-123",
-        company=company,
-        role=UserRole.FLEET_MANAGER,
-    )
-
-
-@pytest.fixture
-def client(manager: CustomUser) -> APIClient:
-    api_client = APIClient()
-    api_client.force_authenticate(user=manager)
-    return api_client
 
 
 @pytest.fixture
@@ -89,7 +66,7 @@ def test_return_view_early_then_zero_conflict_on_rebooking(client, driver, vehic
         format="json",
     )
     assert preview_resp.status_code == status.HTTP_200_OK
-    assert preview_resp.data["durum"] == ReturnStatus.EARLY
+    assert preview_resp.data["status"] == ReturnStatus.EARLY
     rental.refresh_from_db()
     assert rental.status == RentalStatus.ACTIVE  # preview hiçbir şeyi değiştirmedi
 
@@ -99,14 +76,14 @@ def test_return_view_early_then_zero_conflict_on_rebooking(client, driver, vehic
         format="json",
     )
     assert commit_resp.status_code == status.HTTP_200_OK
-    assert commit_resp.data["durum"] == ReturnStatus.EARLY
-    assert commit_resp.data["fark_tutari"] == "-3000.00"
+    assert commit_resp.data["status"] == ReturnStatus.EARLY
+    assert commit_resp.data["price_difference"] == "-3000.00"
 
     vehicle.refresh_from_db()
     assert vehicle.status == VehicleStatus.AVAILABLE
 
-    # Sıfır çakışma: aynı araç için, orijinal (artık kapanmış) rezervasyonla
-    # tarihsel olarak çakışan yeni bir rezervasyon denemesi başarılı olmalı —
+    # Sıfır çakışma: aynı araç için, orijinal (artık kapanmış) kiralamayla
+    # tarihsel olarak çakışan yeni bir kiralama denemesi başarılı olmalı —
     # çünkü eski kayıt artık ACTIVE değil, çakışma kontrolleri onu görmez.
     new_payload = {
         "driver_id": driver.pk,

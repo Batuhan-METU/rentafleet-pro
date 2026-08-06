@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Iterator
 
 
 @contextmanager
@@ -17,5 +17,5 @@ def quiet_loggers(*logger_names: str, level: int = logging.ERROR) -> Iterator[No
     try:
         yield
     finally:
-        for lg, prev in zip(loggers, previous):
+        for lg, prev in zip(loggers, previous, strict=True):
             lg.setLevel(prev)

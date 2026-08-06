@@ -25,6 +25,7 @@ class DriverEvaluationResult:
     factors: tuple[dict[str, Any], ...]
     eligible_vehicles: tuple[dict[str, Any], ...]
     deposit_amount: str | None
+    deposit_percent: str | None
 
 
 class DriverEvaluationService:
@@ -43,6 +44,7 @@ class DriverEvaluationService:
                 "audit": bundle.audit,
                 "eligible_vehicles": list(bundle.vehicles),
                 "deposit_amount": bundle.deposit,
+                "deposit_percent": bundle.deposit_percent,
             },
         )
 
@@ -59,6 +61,7 @@ class DriverEvaluationService:
             factors=bundle.factors,
             eligible_vehicles=bundle.vehicles,
             deposit_amount=bundle.deposit,
+            deposit_percent=bundle.deposit_percent,
         )
 
     def serialize(self, result: DriverEvaluationResult) -> dict[str, Any]:
@@ -71,4 +74,5 @@ class DriverEvaluationService:
             "uyarilar": list(result.warnings),
             "faktorler": list(result.factors),
             "depozito": result.deposit_amount,
+            "depozito_orani": result.deposit_percent,
         }

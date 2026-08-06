@@ -1,112 +1,203 @@
-"""Öngörücü bakım servisi (RentA-Fleet PRO — Day 12).
+"""Öngörücü bakım servisi.
 
-Her aracın kilometresine ve sürücü skoruna bakarak bir sonraki bakım hedefini
-hesaplar ve risk durumunu belirler:
+Gerçek kural: bir aracın SON bakımından itibaren 15.000 km'yi VEYA 12 ayı
+doldurunca bakım şarttır — hangisi önce dolarsa o geçerlidir. Bu iki sınıra
+yaklaşırken üç kademeli durum üretilir:
+  * Sağlıklı   — hedefe (15.000 km / 12 ay) hâlâ ``MAINTENANCE_WARNING_
+    BUFFER_KM``'den (varsayılan 2.000 km) fazla VEYA 30 günden fazla var.
+  * Bakım Bekleyen — hedefe son 2.000 km İÇİNDE veya son 30 gün İÇİNDE
+    (henüz aşılmamış).
+  * Acil — km veya süre sınırı AŞILMIŞ.
+"Son bakım", aracın ``VEHICLE_MAINTENANCE`` ("Araç Bakım") kategorili en
+son ``VehicleExpense`` kaydının tarihi/km'sidir (bu, sihirbazın "Giderler
+→ Operasyon" adımından girilen gerçek verilerdir — ``VEHICLE_MECHANICAL``
+gibi diğer kategoriler bakım sayılmaz). Hiç bakım kaydı yoksa (yeni araç),
+referans noktası filoya giriş tarihi + satın alma km'sidir.
 
-  * Standart bakım aralığı: 15.000 km.
-    target_km = ((current_km // 15000) + 1) * 15000
-  * Dinamik AI düzeltmesi: sürücü skoru < 70 (agresif sürüş) ise yıpranma payı
-    olarak hedef 1.500 km öne çekilir.
-  * kalan_km < 1000  -> SARI_UYARI
-    kalan_km <= 0     -> ACIL_KIRMIZI (dinamik düzeltme bunu tetikleyebilir)
+Kilometre bilgisi (``odometer_km``) gider kaydında opsiyoneldir — girilmemişse
+km boyutu ``None`` (bilinmiyor) döner, asla sahte bir 0/sağlıklı değere
+düşürülmez ("Bilinmiyor ≠ Sıfır", bkz. ``cash_opportunity_service.py``);
+o durumda sadece tarih boyutu değerlendirilir.
 
-ClickHouse kapalıysa sürücü skoru deterministik fallback'e düşer; loglar
-susturulur. Yalnızca ilgilenilmesi gereken araçlar (uyarılı) döndürülür.
+Not: ``Vehicle.current_km``'nin gerçek zamanlı/güvenilir güncellenmesi
+(GPS/takip cihazı entegrasyonu) bu servisin kapsamı DIŞINDADIR — ayrı bir
+iş olarak ele alınacaktır; burada ne besliyorsa güncel değer olarak okunur.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 
-from backend.infrastructure.clickhouse.client import suppress_http_warnings
+from django.db.models import Prefetch
+from django.utils import timezone
+
+from backend.apps.vehicle_finance.choices import ExpenseCategory
+from backend.apps.vehicle_finance.models import VehicleExpense, VehicleFinancialProfile
 from backend.apps.vehicles.models import Vehicle
-from backend.infrastructure.services.common.logging_utils import quiet_loggers
-from backend.infrastructure.services.analytics.scoring_service import SAFE_DRIVER_THRESHOLD, score_for_vehicle_driver
-from backend.infrastructure.services.sipp.sipp_service import format_marka_model_sinif
+from backend.infrastructure.services.cost_calculation.day_math import add_months
+from backend.infrastructure.services.sipp.sipp_service import format_brand_model_segment
 
-MAINTENANCE_INTERVAL_KM = 15_000
-WEAR_REDUCTION_KM = 1_500  # agresif sürüşte hor kullanım yıpranma payı
-WARNING_THRESHOLD_KM = 1_000
+MAINTENANCE_DUE_KM = 15_000
+MAINTENANCE_DUE_MONTHS = 12
+MAINTENANCE_WARNING_BUFFER_KM = 2_000  # hedefe bu kadar km kala "yaklaşıyor" — değiştirilebilir
+MAINTENANCE_WARNING_DAYS_BEFORE_DUE = 30
 
-STATUS_WARNING = "SARI_UYARI"
-STATUS_CRITICAL = "ACIL_KIRMIZI"
+STATUS_HEALTHY = "HEALTHY"
+STATUS_WARNING = "WARNING"
+STATUS_CRITICAL = "CRITICAL"
+
+_STATUS_RANK = {STATUS_CRITICAL: 0, STATUS_WARNING: 1, STATUS_HEALTHY: 2}
+
+
+@dataclass
+class MaintenanceReference:
+    """Bir aracın "son bakım" referans noktası — km ve/veya tarih bilinmeyebilir."""
+
+    date: date | None
+    km: int | None
 
 
 @dataclass
 class MaintenanceAlert:
-    """Bir aracın bakım risk değerlendirmesi."""
+    """Bir aracın bakım risk değerlendirmesi (km + tarih boyutu birleşik)."""
 
     vehicle_id: int
     plate: str
     brand_model: str
     current_km: int
-    target_km: int
-    remaining_km: int
-    progress_pct: float
     status: str
-    aggressive: bool
-    driver_score: int
+    km_status: str | None
+    date_status: str | None
+    last_maintenance_date: date | None
+    last_maintenance_km: int | None
+    target_km: int | None
+    remaining_km: int | None
+    progress_pct: float | None
+    target_date: date | None
+    remaining_days: int | None
 
 
-def _evaluate(vehicle: dict, driver_score: int | None) -> MaintenanceAlert | None:
-    """Tek araç için bakım durumunu hesaplar; uyarı yoksa None döner."""
-    current_km = vehicle["current_km"] or 0
-    base_target = ((current_km // MAINTENANCE_INTERVAL_KM) + 1) * MAINTENANCE_INTERVAL_KM
+def _resolve_reference(vehicle: Vehicle) -> MaintenanceReference:
+    """Aracın son bakım referans noktasını bulur.
 
-    aggressive = driver_score is not None and driver_score < SAFE_DRIVER_THRESHOLD
-    target_km = base_target - (WEAR_REDUCTION_KM if aggressive else 0)
+    Öncelik: en son ``VEHICLE_MAINTENANCE`` kategorili gider kaydı
+    (expense_date'e göre en yeni — ``vehicle.expenses`` ilişkisi
+    ``get_maintenance_statuses``'ta bu kategoriye zaten filtrelenmiş
+    prefetch edilir). Hiç yoksa filoya giriş tarihi + satın alma km'sine
+    düşülür — yeni bir aracın "ilk bakımı" bu noktadan sayılır.
+    """
+    candidates = sorted(
+        vehicle.expenses.all(),
+        key=lambda e: (e.expense_date, e.created_at),
+        reverse=True,
+    )
+    last = candidates[0] if candidates else None
+    if last is not None:
+        return MaintenanceReference(date=last.expense_date, km=last.odometer_km)
 
-    remaining_km = target_km - current_km
+    purchase_km: int | None = None
+    try:
+        purchase_km = vehicle.financial_profile.purchase_km
+    except VehicleFinancialProfile.DoesNotExist:
+        purchase_km = None
+    return MaintenanceReference(date=vehicle.fleet_entry_date, km=purchase_km)
 
+
+def _km_status(remaining_km: int | None) -> str | None:
+    if remaining_km is None:
+        return None
     if remaining_km <= 0:
-        status = STATUS_CRITICAL
-    elif remaining_km < WARNING_THRESHOLD_KM:
-        status = STATUS_WARNING
-    else:
-        return None  # bu araç henüz ilgilenilmeyi gerektirmiyor
+        return STATUS_CRITICAL
+    if remaining_km <= MAINTENANCE_WARNING_BUFFER_KM:
+        return STATUS_WARNING
+    return STATUS_HEALTHY
 
-    interval_start = base_target - MAINTENANCE_INTERVAL_KM
-    window = max(1, target_km - interval_start)  # 0'a bölmeyi önle
-    traveled = current_km - interval_start
-    progress_pct = round(min(100.0, max(0.0, traveled / window * 100.0)), 1)
+
+def _date_status(remaining_days: int | None) -> str | None:
+    if remaining_days is None:
+        return None
+    if remaining_days <= 0:
+        return STATUS_CRITICAL
+    if remaining_days <= MAINTENANCE_WARNING_DAYS_BEFORE_DUE:
+        return STATUS_WARNING
+    return STATUS_HEALTHY
+
+
+def _combined_status(km_status: str | None, date_status: str | None) -> str:
+    known = [s for s in (km_status, date_status) if s is not None]
+    if not known:
+        return STATUS_HEALTHY
+    return min(known, key=lambda s: _STATUS_RANK[s])
+
+
+def _evaluate(vehicle: Vehicle, today: date) -> MaintenanceAlert:
+    ref = _resolve_reference(vehicle)
+    current_km = vehicle.current_km or 0
+
+    km_since_last = (current_km - ref.km) if ref.km is not None else None
+    target_km = (ref.km + MAINTENANCE_DUE_KM) if ref.km is not None else None
+    remaining_km = (target_km - current_km) if target_km is not None else None
+
+    target_date = add_months(ref.date, MAINTENANCE_DUE_MONTHS) if ref.date is not None else None
+    remaining_days = (target_date - today).days if target_date is not None else None
+
+    km_status = _km_status(remaining_km)
+    date_status = _date_status(remaining_days)
+    status = _combined_status(km_status, date_status)
+
+    progress_pct = None
+    if ref.km is not None:
+        # `km_since_last`, `ref.km is not None` olduğu dalda zaten hesaplandı
+        # (yukarıya bkz.) — burada da None olamaz.
+        assert km_since_last is not None
+        progress_pct = round(min(100.0, max(0.0, km_since_last / MAINTENANCE_DUE_KM * 100.0)), 1)
 
     return MaintenanceAlert(
-        vehicle_id=vehicle["id"],
-        plate=vehicle["plate_number"],
-        brand_model=format_marka_model_sinif(
-            vehicle["brand"], vehicle["model"], vehicle.get("sipp_code") or ""
-        ),
+        vehicle_id=vehicle.pk,
+        plate=vehicle.plate_number,
+        brand_model=format_brand_model_segment(vehicle.brand, vehicle.model, vehicle.sipp_code or ""),
         current_km=current_km,
+        status=status,
+        km_status=km_status,
+        date_status=date_status,
+        last_maintenance_date=ref.date,
+        last_maintenance_km=ref.km,
         target_km=target_km,
         remaining_km=remaining_km,
         progress_pct=progress_pct,
-        status=status,
-        aggressive=aggressive,
-        driver_score=driver_score if driver_score is not None else 0,
+        target_date=target_date,
+        remaining_days=remaining_days,
     )
 
 
-def get_maintenance_alerts(company_id: int) -> list[MaintenanceAlert]:
-    """İlgilenilmesi gereken araçların bakım uyarılarını üretir.
+def get_maintenance_statuses(company_id: int, as_of: date | None = None) -> list[MaintenanceAlert]:
+    """Şirketin TÜM araçları için bakım durumunu üretir (sağlıklı dahil).
 
-    En acil (en az kalan km) önce gelecek şekilde sıralanır.
+    En acil (CRITICAL, sonra WARNING, sonra HEALTHY) önce; eşit durumdakiler
+    arasında en az kalan km (biliniyorsa) önce sıralanır.
     """
-    vehicle_qs = Vehicle.objects.filter(company_id=company_id)
-
     vehicles = list(
-        vehicle_qs.values("id", "plate_number", "brand", "model", "sipp_code", "current_km")
+        Vehicle.objects.filter(company_id=company_id)
+        .select_related("financial_profile")
+        .prefetch_related(
+            Prefetch(
+                "expenses",
+                queryset=VehicleExpense.objects.filter(category=ExpenseCategory.VEHICLE_MAINTENANCE),
+            )
+        )
     )
-    if not vehicles:
-        return []
-
-    alerts: list[MaintenanceAlert] = []
-    with suppress_http_warnings(), quiet_loggers("backend.infrastructure.services.analytics.scoring_service"):
-        for vehicle in vehicles:
-            score_result = score_for_vehicle_driver(vehicle["id"])
-            driver_score = score_result.score if score_result else None
-            alert = _evaluate(vehicle, driver_score)
-            if alert is not None:
-                alerts.append(alert)
-
-    alerts.sort(key=lambda a: a.remaining_km)
+    today = as_of or timezone.localdate()
+    alerts = [_evaluate(v, today) for v in vehicles]
+    alerts.sort(
+        key=lambda a: (
+            _STATUS_RANK[a.status],
+            a.remaining_km if a.remaining_km is not None else float("inf"),
+        )
+    )
     return alerts
+
+
+def get_maintenance_alerts(company_id: int, as_of: date | None = None) -> list[MaintenanceAlert]:
+    """Geriye dönük uyumluluk: yalnızca WARNING/CRITICAL araçlar (sağlıklılar hariç)."""
+    return [a for a in get_maintenance_statuses(company_id, as_of=as_of) if a.status != STATUS_HEALTHY]

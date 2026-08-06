@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { getCompanySlug } from '../utils/company.js'
+import { TOKEN_KEY } from '../utils/storageKeys.js'
 
 const apiClient = axios.create({
   // Dev: Vite proxy (/api → Django). Prod: doğrudan backend URL'i ayarlanır.
@@ -9,7 +10,7 @@ const apiClient = axios.create({
 })
 
 apiClient.interceptors.request.use((config) => {
-  const token = localStorage.getItem('rf_token')
+  const token = localStorage.getItem(TOKEN_KEY)
   if (token) config.headers.Authorization = `Token ${token}`
 
   const slug = getCompanySlug()

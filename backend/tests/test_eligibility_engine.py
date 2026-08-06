@@ -6,16 +6,11 @@ from decimal import Decimal
 
 import pytest
 
+from backend.application.rental.driver_eligibility import recommend_vehicles
 from backend.apps.companies.models import Company
 from backend.apps.vehicles.models import Vehicle, VehicleStatus
-from backend.domain.eligibility.engine import recommend_vehicles
 
 pytestmark = pytest.mark.django_db
-
-
-@pytest.fixture
-def company() -> Company:
-    return Company.objects.create(name="test-tenant", tax_number="1234567890")
 
 
 def _vehicle(company: Company, *, brand: str, plate: str, status=VehicleStatus.AVAILABLE, km=10000) -> Vehicle:
@@ -54,6 +49,27 @@ def test_very_low_risk_gets_all_tiers(company):
     results = recommend_vehicles(company.pk, "VERY_LOW")
 
     assert {r["plate_number"] for r in results} == {"34AA004", "34AA005", "34AA006"}
+
+
+def test_very_low_risk_returns_every_available_vehicle_not_just_a_handful(company):
+    # Eski varsayılan limit (8) ve 50'lik ön-kırpma, çok düşük riskli bir
+    # sürücüye filodaki TÜM müsait araçlar yerine yalnızca birkaçının
+    # gösterilmesine yol açıyordu — bu regresyonu kilitler.
+    for i in range(30):
+        _vehicle(company, brand="Dacia", plate=f"34BB{i:03d}", km=i)
+
+    results = recommend_vehicles(company.pk, "VERY_LOW")
+
+    assert len(results) == 30
+
+
+def test_eligible_vehicle_includes_friendly_segment_label(company):
+    _vehicle(company, brand="Toyota", plate="34AA011")
+
+    results = recommend_vehicles(company.pk, "VERY_LOW")
+
+    assert results[0]["segment_label"]
+    assert results[0]["sipp_code"]
 
 
 def test_only_available_vehicles_are_recommended(company):

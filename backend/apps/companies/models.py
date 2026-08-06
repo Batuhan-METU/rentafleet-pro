@@ -19,40 +19,40 @@ class Company(models.Model):
     izole edilir.
     """
 
-    name: str = models.CharField(_("company name"), max_length=255)
-    tax_number: str = models.CharField(
+    name = models.CharField(_("company name"), max_length=255)
+    tax_number = models.CharField(
         _("tax number"),
         max_length=32,
         unique=True,
         help_text=_("Government-issued tax identifier; unique per company."),
     )
-    display_name: str = models.CharField(
+    display_name = models.CharField(
         _("display name"),
         max_length=255,
         blank=True,
         default="",
         help_text=_("Arayüzde görünen ticari marka adı (white-label)."),
     )
-    logo_url: str | None = models.URLField(
+    logo_url = models.URLField(
         _("logo URL"),
         max_length=512,
         blank=True,
         null=True,
         help_text=_("Şirket logosu görsel adresi."),
     )
-    primary_color: str = models.CharField(
+    primary_color = models.CharField(
         _("primary color"),
         max_length=7,
         default="#3B82F6",
         help_text=_("Panel ana renk kodu (hex)."),
     )
-    secondary_color: str = models.CharField(
+    secondary_color = models.CharField(
         _("secondary color"),
         max_length=7,
         default="#1E3A8A",
         help_text=_("Menü / yan panel renk kodu (hex)."),
     )
-    description: str = models.TextField(
+    description = models.TextField(
         _("company description"),
         blank=True,
         default="",
@@ -61,7 +61,6 @@ class Company(models.Model):
     created_at = models.DateTimeField(_("created at"), auto_now_add=True)
 
     class Meta:
-        app_label = "api"
         db_table = "api_company"
         verbose_name = _("company")
         verbose_name_plural = _("companies")
@@ -75,7 +74,7 @@ class Company(models.Model):
 class CustomUser(AbstractUser):
     """Platform user extending Django's ``AbstractUser``."""
 
-    role: str = models.CharField(
+    role = models.CharField(
         _("role"),
         max_length=32,
         choices=UserRole.choices,
@@ -93,7 +92,6 @@ class CustomUser(AbstractUser):
     )
 
     class Meta:
-        app_label = "api"
         db_table = "api_customuser"
         verbose_name = _("user")
         verbose_name_plural = _("users")

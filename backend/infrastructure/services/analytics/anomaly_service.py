@@ -72,36 +72,11 @@ def _aggressive_message(max_speed: float) -> str:
     )
 
 
-def _query_security_stats(vehicle_id: int) -> dict[str, object]:
-    """ClickHouse'tan güvenlik analizi için özet istatistikleri çeker."""
-    with suppress_http_warnings():
-        client = get_clickhouse_client()
-        result = client.query(
-            "SELECT "
-            f"countIf(toHour(timestamp) < {NIGHT_END_HOUR}) AS night_count, "
-            f"maxIf(timestamp, toHour(timestamp) < {NIGHT_END_HOUR}) AS night_ts, "
-            "max(speed) AS max_speed, "
-            "countIf(event_type = 'harsh_brake') AS brakes, "
-            "argMax(timestamp, speed) AS fastest_ts "
-            f"FROM {TELEMETRY_TABLE} "
-            "WHERE device_id = %(vehicle_id)s",
-            parameters={"vehicle_id": vehicle_id},
-        )
-    row = result.result_rows[0]
-    return {
-        "night_count": int(row[0] or 0),
-        "night_ts": row[1],
-        "max_speed": float(row[2] or 0.0),
-        "brakes": int(row[3] or 0),
-        "fastest_ts": row[4],
-    }
-
-
 def _detect_from_stats(stats: dict[str, object]) -> list[Anomaly]:
     """Gerçek telemetri istatistiklerinden anomalileri türetir."""
     anomalies: list[Anomaly] = []
 
-    if int(stats["night_count"]) >= NIGHT_ACTIVITY_THRESHOLD:  # type: ignore[arg-type]
+    if int(stats["night_count"]) >= NIGHT_ACTIVITY_THRESHOLD:  # type: ignore[call-overload]
         night_ts = stats["night_ts"]
         when = night_ts if isinstance(night_ts, dt.datetime) else dt.datetime.now()
         anomalies.append(
@@ -109,7 +84,7 @@ def _detect_from_stats(stats: dict[str, object]) -> list[Anomaly]:
         )
 
     max_speed = float(stats["max_speed"])  # type: ignore[arg-type]
-    if max_speed > AGGRESSIVE_SPEED_KMH and int(stats["brakes"]) >= AGGRESSIVE_BRAKE_THRESHOLD:  # type: ignore[arg-type]
+    if max_speed > AGGRESSIVE_SPEED_KMH and int(stats["brakes"]) >= AGGRESSIVE_BRAKE_THRESHOLD:  # type: ignore[call-overload]
         anomalies.append(
             Anomaly(
                 TYPE_AGGRESSIVE,
@@ -167,26 +142,6 @@ def _fallback_anomalies(vehicle_id: int) -> list[Anomaly]:
         len(anomalies),
     )
     return anomalies
-
-
-def detect_vehicle_anomalies(
-    vehicle_id: int,
-    *,
-    allowed_vehicle_ids: set[int] | frozenset[int] | None = None,
-) -> list[Anomaly]:
-    """Verilen araç için güvenlik anomalilerini tespit eder.
-
-    ``allowed_vehicle_ids`` verilirse yalnızca kiracıya ait araçlar sorgulanır
-    (multi-tenant ClickHouse izolasyonu).
-    """
-    if allowed_vehicle_ids is not None and vehicle_id not in allowed_vehicle_ids:
-        return []
-    try:
-        stats = _query_security_stats(vehicle_id)
-    except OperationalError:
-        return _fallback_anomalies(vehicle_id)
-
-    return _detect_from_stats(stats)
 
 
 def detect_fleet_critical_vehicle_ids(

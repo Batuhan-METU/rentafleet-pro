@@ -6,17 +6,21 @@ from django.shortcuts import get_object_or_404
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.request import Request
 
-from backend.apps.customer_profiles.models import Driver
-from backend.apps.floor_pricing.models import (
-    RentalIncome,
-    VehicleExpense,
-)
-from backend.apps.reservations.models import Rental
 from backend.apps.companies.models import (
     Company,
     CustomUser,
 )
-from backend.apps.vehicles.models import Vehicle
+from backend.apps.customer_profiles.models import Driver
+from backend.apps.rentals.models import Rental
+from backend.apps.vehicle_finance.models import (
+    CompanyOverheadExpense,
+    InsurancePolicy,
+    Loan,
+    LoanVehicleAllocation,
+    RentalIncome,
+    VehicleExpense,
+)
+from backend.apps.vehicles.models import Vehicle, VehicleDocument
 
 
 def get_user_company(request: Request) -> Company | None:
@@ -77,7 +81,7 @@ def get_scoped_driver(request: Request, pk: int) -> Driver:
 
 def get_scoped_rental(request: Request, pk: int) -> Rental:
     company = get_user_company(request)
-    return get_object_or_404(Rental, pk=pk, driver__company=company)
+    return get_object_or_404(Rental, pk=pk, company=company)
 
 
 def get_scoped_expense(request: Request, pk: int) -> VehicleExpense:
@@ -85,9 +89,34 @@ def get_scoped_expense(request: Request, pk: int) -> VehicleExpense:
     return get_object_or_404(VehicleExpense, pk=pk, vehicle__company=company)
 
 
+def get_scoped_document(request: Request, pk: int) -> VehicleDocument:
+    company = get_user_company(request)
+    return get_object_or_404(VehicleDocument, pk=pk, vehicle__company=company)
+
+
 def get_scoped_income(request: Request, pk: int) -> RentalIncome:
     company = get_user_company(request)
     return get_object_or_404(RentalIncome, pk=pk, vehicle__company=company)
+
+
+def get_scoped_loan(request: Request, pk: int) -> Loan:
+    company = get_user_company(request)
+    return get_object_or_404(Loan, pk=pk, company=company)
+
+
+def get_scoped_policy(request: Request, pk: int) -> InsurancePolicy:
+    company = get_user_company(request)
+    return get_object_or_404(InsurancePolicy, pk=pk, vehicle__company=company)
+
+
+def get_scoped_overhead(request: Request, pk: int) -> CompanyOverheadExpense:
+    company = get_user_company(request)
+    return get_object_or_404(CompanyOverheadExpense, pk=pk, company=company)
+
+
+def get_scoped_loan_allocation(request: Request, pk: int) -> LoanVehicleAllocation:
+    company = get_user_company(request)
+    return get_object_or_404(LoanVehicleAllocation, pk=pk, loan__company=company)
 
 
 def company_vehicle_ids(company_id: int) -> list[int]:

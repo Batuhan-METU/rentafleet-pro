@@ -17,16 +17,16 @@ from __future__ import annotations
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 
 from clickhouse_connect.driver.exceptions import OperationalError
 from django.utils import timezone
 
-from backend.infrastructure.clickhouse.client import get_clickhouse_client, suppress_http_warnings
-from backend.apps.reservations.models import (
+from backend.apps.rentals.models import (
     Rental,
     RentalStatus,
 )
+from backend.infrastructure.clickhouse.client import get_clickhouse_client, suppress_http_warnings
 
 logger = logging.getLogger(__name__)
 
@@ -75,9 +75,16 @@ def driver_comment(score: int) -> str:
 
 
 def _naive_utc(dt: datetime) -> datetime:
-    """ClickHouse DateTime ile karşılaştırma için timezone bilgisini atar."""
+    """ClickHouse DateTime ile karşılaştırma için timezone bilgisini atar.
+
+    GERÇEK ÇALIŞMA ZAMANI HATASI DÜZELTİLDİ: ``django.utils.timezone.utc``
+    Django 5'te kaldırıldı (artık ``datetime.UTC`` kullanılmalı) — bu satır
+    aware bir ``dt`` ile çağrıldığında ``AttributeError`` fırlatıyordu; bunu
+    hiçbir test yakalamamıştı çünkü hiçbiri aware bir datetime ile
+    çağırmıyordu (bkz. üretim sertleştirme + mypy denetimi).
+    """
     if timezone.is_aware(dt):
-        return timezone.make_naive(dt, timezone.utc)
+        return timezone.make_naive(dt, UTC)
     return dt
 
 
@@ -181,22 +188,3 @@ def calculate_driver_score(driver_id: int) -> DriverScore:
         rental_count=rental_count,
         is_fallback=False,
     )
-
-
-def score_for_vehicle_driver(vehicle_id: int) -> DriverScore | None:
-    """Aracın aktif (veya son) kiracısının skorunu döndürür; kiracı yoksa None."""
-    rental = (
-        Rental.objects.filter(vehicle_id=vehicle_id, status=RentalStatus.ACTIVE)
-        .order_by("-started_at")
-        .first()
-    )
-    if rental is None:
-        rental = (
-            Rental.objects.filter(vehicle_id=vehicle_id)
-            .exclude(status=RentalStatus.CANCELLED)
-            .order_by("-started_at")
-            .first()
-        )
-    if rental is None:
-        return None
-    return calculate_driver_score(rental.driver_id)

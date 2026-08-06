@@ -26,14 +26,15 @@ def build_driver_risk_payload(driver: Driver) -> dict[str, Any] | None:
 
     blockers = audit.get("blockers", []) if isinstance(audit, dict) else []
     eligible = vehicles or []
-    onaylandi = bool(level) and not blockers and bool(eligible)
+    is_approved = bool(level) and not blockers and bool(eligible)
 
     return {
         "skor": snapshot.risk_score if snapshot else driver.current_risk_score,
         "seviye": level,
         "seviye_label": RISK_LEVEL_LABELS.get(level or "", level or "—"),
-        "onaylandi": onaylandi,
+        "onaylandi": is_approved,
         "depozito": breakdown.get("deposit_amount"),
+        "depozito_orani": breakdown.get("deposit_percent"),
         "uygun_araclar": eligible,
         "uyarilar": audit.get("warnings", []) if isinstance(audit, dict) else [],
         "blokajlar": blockers,

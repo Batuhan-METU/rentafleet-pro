@@ -22,10 +22,11 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections.abc import Iterator
 from contextlib import contextmanager
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 import clickhouse_connect
 from clickhouse_connect.driver.client import Client
@@ -61,7 +62,7 @@ def suppress_http_warnings() -> Iterator[None]:
     try:
         yield
     finally:
-        for lg, level in zip(loggers, previous_levels):
+        for lg, level in zip(loggers, previous_levels, strict=True):
             lg.setLevel(level)
 
 

@@ -1,38 +1,56 @@
-# frontend
+# RentA-Fleet PRO — Frontend
 
-This template should help get you started developing with Vue 3 in Vite.
+Vue 3 (`<script setup>`) + Pinia single-page app. See the
+[repo root README](../README.md) for the full project overview and backend
+setup.
 
-## Recommended IDE Setup
-
-[VS Code](https://code.visualstudio.com/) + [Vue (Official)](https://marketplace.visualstudio.com/items?itemName=Vue.volar) (and disable Vetur).
-
-## Recommended Browser Setup
-
-- Chromium-based browsers (Chrome, Edge, Brave, etc.):
-  - [Vue.js devtools](https://chromewebstore.google.com/detail/vuejs-devtools/nhdogjmejiglipccpnnnanhbledajbpd)
-  - [Turn on Custom Object Formatter in Chrome DevTools](http://bit.ly/object-formatters)
-- Firefox:
-  - [Vue.js devtools](https://addons.mozilla.org/en-US/firefox/addon/vue-js-devtools/)
-  - [Turn on Custom Object Formatter in Firefox DevTools](https://fxdx.dev/firefox-devtools-custom-object-formatters/)
-
-## Customize configuration
-
-See [Vite Configuration Reference](https://vite.dev/config/).
-
-## Project Setup
+## Project setup
 
 ```sh
 npm install
 ```
 
-### Compile and Hot-Reload for Development
+### Dev server (proxies `/api` to `http://127.0.0.1:8000`)
 
 ```sh
 npm run dev
 ```
 
-### Compile and Minify for Production
+### Production build
 
 ```sh
 npm run build
 ```
+
+### Tests (Vitest)
+
+```sh
+npm run test        # single run
+npm run test:watch  # watch mode
+```
+
+### Lint / format
+
+```sh
+npm run lint    # eslint
+npm run format  # prettier --write src
+```
+
+## Structure
+
+```
+src/stores/       Pinia stores — one per domain concern (vehicle, vehicleMarket,
+                   vehicleLiveTracking, vehicleMaintenance, rental, driver, ...)
+src/components/   Reusable UI + feature components
+src/views/        Top-level screens switched by stores/uiStore.js's hash router
+src/composables/  Shared reactive logic (useModalLifecycle, useClickOutside, ...)
+src/utils/        Pure helpers (formatting, icon paths, storage keys, ...)
+```
+
+Non-landing views/modals are lazy-loaded via `defineAsyncComponent` in
+`views/Workspace.vue` and `App.vue` to keep the initial bundle small — see
+that file before adding a new top-level view.
+
+## Recommended IDE setup
+
+[VS Code](https://code.visualstudio.com/) + [Vue (Official)](https://marketplace.visualstudio.com/items?itemName=Vue.volar).

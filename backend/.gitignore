@@ -1,0 +1,69 @@
+# --- Secrets / environment ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg
+*.egg-info/
+.eggs/
+dist/
+build/
+*.manifest
+*.spec
+pip-log.txt
+pip-delete-this-directory.txt
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+
+# --- Virtual environment ---
+backend_env/
+venv/
+.venv/
+env/
+ENV/
+
+# --- Django ---
+db.sqlite3
+db.sqlite3-journal
+db.sqlite3.backup-*
+/staticfiles/
+/media/
+local_settings.py
+
+# --- ClickHouse / data dumps ---
+*.dump
+*.sql.gz
+
+# --- Logs ---
+logs/
+*.log
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# --- Playwright / browser tooling ---
+playwright-report/
+test-results/
+.playwright/
+
+# --- Cursor / local tooling ---
+.cursor/

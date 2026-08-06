@@ -52,21 +52,21 @@ def parse_date_param(value: str, *, field_name: str) -> date:
 
 def resolve_rental_window(
     *,
-    baslangic_tarihi: str | None,
-    bitis_tarihi: str | None,
+    pickup_date_param: str | None,
+    dropoff_date_param: str | None,
     today: date | None = None,
 ) -> tuple[RentalDateWindow, bool]:
     """Query param'lardan pencere çözümler; ikinci değer varsayılan pencere mi."""
-    if not baslangic_tarihi and not bitis_tarihi:
+    if not pickup_date_param and not dropoff_date_param:
         window = rental_window(today=today)
         return window, True
 
-    if not baslangic_tarihi or not bitis_tarihi:
+    if not pickup_date_param or not dropoff_date_param:
         raise ValueError("baslangic_tarihi ve bitis_tarihi birlikte gönderilmelidir.")
 
     window = rental_window_from_dates(
-        parse_date_param(baslangic_tarihi, field_name="baslangic_tarihi"),
-        parse_date_param(bitis_tarihi, field_name="bitis_tarihi"),
+        parse_date_param(pickup_date_param, field_name="baslangic_tarihi"),
+        parse_date_param(dropoff_date_param, field_name="bitis_tarihi"),
     )
     default = rental_window(today=today)
     is_default = (

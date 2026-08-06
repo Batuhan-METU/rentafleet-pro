@@ -2,9 +2,7 @@ import { defineStore } from 'pinia'
 import apiClient, { setUnauthorizedHandler } from '../services/api.js'
 import { useBrandingStore } from './brandingStore.js'
 import { inferCompanySlug, setCompanySlug } from '../utils/company.js'
-
-const TOKEN_KEY = 'rf_token'
-const USER_KEY = 'rf_user'
+import { TOKEN_KEY, USER_KEY } from '../utils/storageKeys.js'
 
 export const useAuthStore = defineStore('auth', {
   state: () => ({

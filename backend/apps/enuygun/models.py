@@ -7,6 +7,49 @@ from django.utils.translation import gettext_lazy as _
 from backend.apps.vehicles.models import Vehicle
 
 
+class CarValuation(models.Model):
+    """TSB (Türkiye Sigortalar Birliği) Kasko Değer Listesi satırı.
+
+    ``202607R1.xlsx`` gibi aylık TSB listelerinden ``import_kasko_values``
+    komutuyla doldurulur. Geniş tablo (tip başına yıl sütunları) burada uzun
+    forma normalize edilir: her (marka, tip, yıl) için tek kasko bedeli.
+
+    Piyasa analizi araçları SIPP koduna göre değil, bu tablodan bulunan
+    kasko bedelinin düştüğü değer segmentine (tier) göre eşleştirir —
+    tedarikçilerin yanlış SIPP kodları ortalamayı artık kirletemez.
+    """
+
+    brand_code = models.PositiveIntegerField(_("brand code"), db_index=True)
+    type_code = models.PositiveIntegerField(_("type code"))
+    brand_name = models.CharField(_("brand name"), max_length=64, db_index=True)
+    type_name = models.CharField(_("type name"), max_length=128)
+    year = models.PositiveIntegerField(_("model year"))
+    kasko_value = models.DecimalField(
+        _("kasko value"),
+        max_digits=14,
+        decimal_places=2,
+        help_text=_("TSB listesindeki kasko bedeli (TL)."),
+    )
+
+    class Meta:
+        db_table = "api_carvaluation"
+        verbose_name = _("car valuation")
+        verbose_name_plural = _("car valuations")
+        ordering = ("brand_name", "type_name", "-year")
+        constraints = (
+            models.UniqueConstraint(
+                fields=("brand_code", "type_code", "year"),
+                name="uniq_car_valuation_type_year",
+            ),
+        )
+        indexes = (
+            models.Index(fields=("brand_name", "year")),
+        )
+
+    def __str__(self) -> str:
+        return f"{self.brand_name} {self.type_name} ({self.year}): {self.kasko_value} TL"
+
+
 class CompetitorPrice(models.Model):
     """Rakip platform / firma günlük kiralama fiyatı (müdür tarafından girilir).
 
@@ -26,6 +69,14 @@ class CompetitorPrice(models.Model):
         blank=True,
         default="",
         db_index=True,
+        help_text=_("Bilgi amaçlı denormalize ilan SIPP kodu; eşleştirmede kullanılmaz."),
+    )
+    match_basis = models.CharField(
+        _("match basis"),
+        max_length=16,
+        blank=True,
+        default="",
+        help_text=_("Kaydın hangi bağımsız yöntemle üretildiği: SIPP | TSB_TYPE_CODE."),
     )
     source_name = models.CharField(
         _("source name"),
@@ -71,16 +122,18 @@ class CompetitorPrice(models.Model):
     created_at = models.DateTimeField(_("created at"), auto_now_add=True)
 
     class Meta:
-        app_label = "api"
         db_table = "api_competitorprice"
         verbose_name = _("competitor price")
         verbose_name_plural = _("competitor prices")
         ordering = ("source_name",)
         constraints = (
+            # match_basis dahil: aynı Enuygun ilanı hem SIPP hem TSB tip
+            # kodu yöntemiyle bağımsız olarak eşleşebilir — bu durumda iki
+            # ayrı satır (iki match_basis) olarak saklanır.
             models.UniqueConstraint(
-                fields=("vehicle", "external_reference", "pickup_date", "dropoff_date"),
+                fields=("vehicle", "external_reference", "pickup_date", "dropoff_date", "match_basis"),
                 condition=~models.Q(external_reference=""),
-                name="uniq_competitor_price_vehicle_ext_ref_window",
+                name="uniq_competitor_price_vehicle_ext_ref_window_basis",
             ),
         )
         indexes = (
@@ -103,7 +156,6 @@ class EnuygunMarketSnapshot(models.Model):
     reservation_count = models.PositiveIntegerField(_("reservation count"), default=0)
 
     class Meta:
-        app_label = "api"
         db_table = "api_enuygunmarketsnapshot"
         verbose_name = _("Enuygun market snapshot")
         verbose_name_plural = _("Enuygun market snapshots")
@@ -140,7 +192,6 @@ class EnuygunCachedReservation(models.Model):
     currency = models.CharField(_("currency"), max_length=8, default="TRY")
 
     class Meta:
-        app_label = "api"
         db_table = "api_enuyguncachedreservation"
         verbose_name = _("cached Enuygun reservation")
         verbose_name_plural = _("cached Enuygun reservations")
@@ -177,13 +228,3 @@ class EnuygunCachedReservation(models.Model):
             },
         }
 
-
-# ======================================================================
-# FİNANSAL KARAR DESTEK MODELLERİ
-# ----------------------------------------------------------------------
-# Bir araç kiralama şirketinin araç başına gerçek kârını modellemek için:
-#   * VehicleFinancialProfile — satın alma + kiralama fiyat yapısı + beklenen kullanım
-#   * VehicleExpense           — tek seferlik veya tekrarlayan giderler
-#   * RentalIncome             — araç bazlı kiralama gelirleri
-# Tüm parasal alanlar DecimalField'tir; hesaplamalar servis katmanında yapılır.
-# ======================================================================

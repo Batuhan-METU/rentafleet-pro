@@ -1,0 +1,959 @@
+"""Seed the local stores with realistic demo data.
+
+Run with::
+
+    python3 manage.py seed_data
+    python3 manage.py seed_data --flush                 # wipe first
+    python3 manage.py seed_data --companies 10 --vehicles 100 --logs-per-vehicle 1000
+
+What it does:
+  1. Relational (SQLite via Django ORM): inserts fake ``Company`` and
+     ``Vehicle`` rows.
+  2. Analytics (ClickHouse via clickhouse-connect): generates a coherent
+     historical telemetry trajectory per vehicle and bulk-inserts it into
+     ``telemetry_logs`` in batches, using the native column-oriented insert
+     path to stay fast and avoid HTTP timeouts.
+
+The telemetry is *correlated*, not pure noise: each vehicle performs a GPS
+random-walk around Ankara, fuel drains as it drives (with occasional
+refuels), and speed fluctuates — deliberately producing ``speed_violation``
+and ``harsh_brake`` events for the future anomaly-detection model.
+
+Use this for volume/analytics testing (fake, randomized companies/vehicles +
+ClickHouse telemetry). For a fixed, branded sales-demo scenario (two named
+white-label tenants with real login credentials, no telemetry), use
+``manage.py fleet_ops seed`` instead (see that command's docstring) — it
+reuses this module's ``SEED_VEHICLE_CATALOG`` so the two never drift apart
+on vehicle data.
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+import random
+from collections.abc import Iterable, Iterator
+from decimal import Decimal
+from typing import Any
+
+from clickhouse_connect.driver.exceptions import OperationalError
+from django.core.management.base import BaseCommand, CommandParser
+from django.db import transaction
+from django.utils import timezone
+from faker import Faker
+
+from backend.application.driver.evaluate_driver import DriverEvaluationService
+from backend.apps.companies.models import (
+    Company,
+    CustomUser,
+    UserRole,
+)
+from backend.apps.customer_profiles.models import (
+    Driver,
+    Gender,
+)
+from backend.apps.rentals.models import (
+    Rental,
+    RentalStatus,
+    ReturnStatus,
+)
+from backend.apps.vehicles.models import (
+    Vehicle,
+    VehicleStatus,
+)
+from backend.infrastructure.clickhouse.client import (
+    apply_schema,
+    ensure_database,
+    get_clickhouse_client,
+    suppress_http_warnings,
+)
+from backend.infrastructure.services.analytics.maintenance_service import MAINTENANCE_DUE_KM
+
+# --- Tunable defaults --------------------------------------------------
+DEFAULT_COMPANIES = 1  # single-tenant: kurulum başına tek şirket
+DEFAULT_VEHICLES = 100
+DEFAULT_DRIVERS = 80
+DEFAULT_LOGS_PER_VEHICLE = 1_000  # 100 vehicles * 1_000 => 100_000 telemetry rows
+CLICKHOUSE_INSERT_BATCH = 10_000  # rows per ClickHouse insert call
+TELEMETRY_TABLE = "telemetry_logs"
+
+# Column order MUST match the tuples produced in `_build_vehicle_trajectory`.
+TELEMETRY_COLUMNS: tuple[str, ...] = (
+    "device_id",
+    "timestamp",
+    "speed",
+    "fuel_level",
+    "latitude",
+    "longitude",
+    "event_type",
+)
+
+# --- Domain constants --------------------------------------------------
+ANKARA_CENTER = (39.9334, 32.8597)  # (latitude, longitude)
+
+# (marka, model, SIPP) — Enuygun eşleştirmesini test etmek için çeşitli kodlar.
+# resolve_sipp() çoğu modelde ECMR (manuel) döndürür; seed'de kodu açıkça yazıyoruz.
+SEED_VEHICLE_CATALOG: tuple[tuple[str, str, str], ...] = (
+    # Ekonomik hatch — EC**
+    ("Renault", "Clio", "ECAR"),
+    ("Renault", "Clio", "ECMR"),
+    ("Renault", "Clio", "ECAD"),
+    ("Hyundai", "i20", "ECAR"),
+    ("Hyundai", "i20", "ECMR"),
+    ("Opel", "Corsa", "ECAR"),
+    ("Opel", "Corsa", "ECAD"),
+    ("Citroen", "C3", "ECAR"),
+    ("Kia", "Picanto", "ECAR"),
+    ("Kia", "Rio", "ECAR"),
+    ("Toyota", "Yaris", "ECAR"),
+    ("Volkswagen", "Polo", "ECAR"),
+    ("Dacia", "Sandero", "ECMR"),
+    ("Fiat", "Panda", "MCMR"),
+    ("Fiat", "500", "MCAR"),
+    # Kompakt — CD**
+    ("Fiat", "Egea", "CDAR"),
+    ("Fiat", "Egea", "CDMR"),
+    ("Fiat", "Egea", "CDAD"),
+    ("Volkswagen", "Golf", "CDAR"),
+    ("Ford", "Focus", "CDAR"),
+    ("Hyundai", "Accent", "CDAR"),
+    ("Renault", "Megane", "CDMR"),
+    # Orta sedan — ID**
+    ("Toyota", "Corolla", "IDAR"),
+    ("Toyota", "Corolla", "IDMR"),
+    ("Renault", "Megane Sedan", "IDAR"),
+    ("Skoda", "Octavia", "IDAR"),
+    # Standart — SD**
+    ("Volkswagen", "Passat", "SDAR"),
+    ("Volkswagen", "Passat", "SDMR"),
+    ("Skoda", "Superb", "SDAR"),
+    # Kompakt SUV — CF**
+    ("Peugeot", "2008", "CFAR"),
+    ("Opel", "Mokka", "CFAR"),
+    ("Nissan", "Juke", "CFAR"),
+    ("Hyundai", "Bayon", "CFAR"),
+    ("Ford", "Puma", "CFAR"),
+    ("Toyota", "C-HR", "CFAR"),
+    ("Fiat", "Egea Cross", "CFAR"),
+    # SUV — IF**
+    ("Hyundai", "Tucson", "IFAR"),
+    ("Hyundai", "Tucson", "IFMR"),
+    ("Dacia", "Duster", "IFAR"),
+    ("Peugeot", "3008", "IFAR"),
+    ("Citroen", "C5 Aircross", "IFAR"),
+    ("Seat", "Ateca", "IFAR"),
+    # Ticari — FV**
+    ("Ford", "Transit", "FVMR"),
+    ("Ford", "Tourneo Courier", "FVMR"),
+    ("Citroen", "Berlingo", "FVMR"),
+    ("Peugeot", "Rifter", "FVMR"),
+)
+TELEMETRY_INTERVAL_SECONDS = 60  # one ping per minute of simulated driving
+
+# Segment başına gerçekçi günlük fiyat bantları (TL) — kiralama seed'inde kullanılır.
+DAILY_RATE_CHOICES: tuple[int, ...] = (900, 1100, 1300, 1600, 2000, 2500, 3200, 4000, 4800)
+LATE_PENALTY_MULTIPLIER = Decimal("1.25")
+
+# --- Gerçek maliyet hesabı (MALIYET_HESAPLAMA_METODOLOJISI) sentetik verisi ---
+# SIPP 2-harf öneki → (min, max) satın alım fiyatı bandı (TL). Segment başına
+# kabaca gerçekçi bir aralık; gerçek fiyat verisi geldiğinde bu tamamen atlanır.
+SIPP_PRICE_BANDS: dict[str, tuple[int, int]] = {
+    "EC": (650_000, 950_000),
+    "MC": (600_000, 850_000),
+    "CD": (900_000, 1_300_000),
+    "ID": (1_100_000, 1_600_000),
+    "SD": (1_500_000, 2_200_000),
+    "CF": (1_200_000, 1_800_000),
+    "IF": (1_600_000, 2_600_000),
+    "FV": (1_300_000, 2_000_000),
+}
+DEFAULT_PRICE_BAND: tuple[int, int] = (800_000, 1_400_000)
+
+# §11 — finansman tipi dağılımı, dokümandaki oranların birebir aynısı (sentetik).
+FINANCING_TYPE_WEIGHTS: tuple[int, int, int] = (35, 50, 15)  # CASH, LOAN, MIXED
+LOAN_LENDER_NAMES: tuple[str, ...] = (
+    "Ziraat Bankası",
+    "İş Bankası",
+    "Garanti BBVA",
+    "Yapı Kredi",
+    "Akbank",
+    "Halkbank",
+)
+LOAN_TERM_CHOICES: tuple[int, ...] = (12, 24, 36, 48)
+
+
+class Command(BaseCommand):
+    help = "Seed SQLite (companies/vehicles) and ClickHouse (telemetry_logs) with demo data."
+
+    def add_arguments(self, parser: CommandParser) -> None:
+        parser.add_argument("--companies", type=int, default=DEFAULT_COMPANIES)
+        parser.add_argument("--vehicles", type=int, default=DEFAULT_VEHICLES)
+        parser.add_argument("--drivers", type=int, default=DEFAULT_DRIVERS)
+        parser.add_argument("--logs-per-vehicle", type=int, default=DEFAULT_LOGS_PER_VEHICLE)
+        parser.add_argument(
+            "--flush",
+            action="store_true",
+            help="Delete existing seeded data (companies/vehicles + telemetry) first.",
+        )
+        parser.add_argument(
+            "--seed",
+            type=int,
+            default=None,
+            help="Optional RNG seed for reproducible data.",
+        )
+        parser.add_argument(
+            "--skip-telemetry",
+            action="store_true",
+            help="Seed only relational data; skip ClickHouse (useful when it is offline).",
+        )
+
+    def handle(self, *args: Any, **options: Any) -> None:
+        if options["seed"] is not None:
+            random.seed(options["seed"])
+            Faker.seed(options["seed"])
+
+        faker = Faker("tr_TR")
+
+        if options["flush"]:
+            self._flush(skip_telemetry=options["skip_telemetry"])
+
+        companies = self._seed_companies(faker, options["companies"])
+        self._seed_users(companies[0])
+        vehicles = self._seed_vehicles(faker, companies, options["vehicles"])
+        self._seed_financing(companies, vehicles)
+        drivers = self._seed_drivers(faker, companies[0], options["drivers"])
+        self._seed_rentals(faker, drivers, vehicles)
+
+        if options["skip_telemetry"]:
+            self.stdout.write(self.style.WARNING("Skipping telemetry (ClickHouse) seeding."))
+        else:
+            self._seed_telemetry(vehicles, options["logs_per_vehicle"])
+
+        self.stdout.write(self.style.SUCCESS("Seeding complete."))
+
+    # ------------------------------------------------------------------
+    # Relational (SQLite) seeding
+    # ------------------------------------------------------------------
+    @transaction.atomic
+    def _seed_companies(self, faker: Faker, count: int) -> list[Company]:
+        self.stdout.write(f"Creating {count} companies...")
+        companies = [
+            Company(
+                name=f"{faker.company()} Rent-a-Car",
+                # Turkish tax numbers are 10 digits; uniqueness enforced by model.
+                tax_number=faker.unique.numerify("##########"),
+            )
+            for _ in range(count)
+        ]
+        Company.objects.bulk_create(companies)
+        # bulk_create on SQLite returns objects with PKs populated.
+        return list(Company.objects.order_by("-id")[:count])
+
+    @transaction.atomic
+    def _seed_users(self, company: Company) -> None:
+        """Demo kurumsal kullanıcılar (Filo Müdürü + Operasyon Personeli)."""
+        self.stdout.write("Creating demo staff users...")
+        demos = (
+            {
+                "username": "mudur",
+                "password": "mudur123",
+                "first_name": "Ahmet",
+                "last_name": "Yılmaz",
+                "role": UserRole.FLEET_MANAGER,
+            },
+            {
+                "username": "operasyon",
+                "password": "operasyon123",
+                "first_name": "Elif",
+                "last_name": "Kaya",
+                "role": UserRole.OPERATIONS_STAFF,
+            },
+        )
+        for spec in demos:
+            user, created = CustomUser.objects.get_or_create(
+                username=spec["username"],
+                defaults={
+                    "first_name": spec["first_name"],
+                    "last_name": spec["last_name"],
+                    "role": spec["role"],
+                    "company": company,
+                },
+            )
+            if created:
+                user.set_password(spec["password"])
+                user.save()
+                self.stdout.write(f"  + {spec['username']} ({spec['role']})")
+            else:
+                user.role = spec["role"]
+                user.company = company
+                user.set_password(spec["password"])
+                user.save()
+                self.stdout.write(f"  ~ {spec['username']} güncellendi")
+
+    @transaction.atomic
+    def _seed_vehicles(
+        self, faker: Faker, companies: list[Company], count: int
+    ) -> list[Vehicle]:
+        self.stdout.write(f"Creating {count} vehicles (SIPP çeşitli filo)...")
+        statuses = list(VehicleStatus.values)
+        catalog = list(SEED_VEHICLE_CATALOG)
+        vehicles: list[Vehicle] = []
+
+        # Önce katalogdaki her SIPP'ten en az bir araç garanti et.
+        for brand, model_name, sipp_code in catalog:
+            if len(vehicles) >= count:
+                break
+            vehicles.append(
+                self._build_vehicle(faker, companies, statuses, brand, model_name, sipp_code, index=len(vehicles))
+            )
+
+        # Kalan slotları katalogdan rastgele doldur.
+        while len(vehicles) < count:
+            brand, model_name, sipp_code = random.choice(catalog)
+            vehicles.append(
+                self._build_vehicle(faker, companies, statuses, brand, model_name, sipp_code, index=len(vehicles))
+            )
+
+        Vehicle.objects.bulk_create(vehicles)
+        created = list(Vehicle.objects.order_by("-id")[:count])
+        sipp_counts: dict[str, int] = {}
+        for v in created:
+            key = (v.sipp_code or "????")[:2]
+            sipp_counts[key] = sipp_counts.get(key, 0) + 1
+        self.stdout.write(f"  SIPP segment dağılımı: {dict(sorted(sipp_counts.items()))}")
+        return created
+
+    @staticmethod
+    def _build_vehicle(
+        faker: Faker,
+        companies: list[Company],
+        statuses: list[str],
+        brand: str,
+        model_name: str,
+        sipp_code: str,
+        *,
+        index: int = 0,
+    ) -> Vehicle:
+        production_year = random.randint(2015, 2025)
+        return Vehicle(
+            plate_number=Command._fake_plate(faker),
+            brand=brand,
+            model=model_name,
+            sipp_code=sipp_code,
+            production_year=production_year,
+            current_km=Command._maintenance_aware_km(index),
+            status=random.choices(statuses, weights=(6, 3, 1, 1), k=1)[0],
+            company=random.choice(companies),
+            fleet_entry_date=Command._fleet_entry_date(production_year),
+            purchase_price=Command._realistic_purchase_price(sipp_code),
+        )
+
+    @staticmethod
+    def _fleet_entry_date(production_year: int) -> dt.date:
+        """Üretim yılından sonra, bugünden önce, makul bir filoya giriş tarihi.
+
+        Gerçek maliyet hesaplarının zaman ekseni (§1.1) bu tarihten başlar.
+        """
+        today = dt.date.today()
+        earliest = dt.date(production_year, 1, 1)
+        days_since_earliest = max((today - earliest).days, 30)
+        days_ago = random.randint(30, min(days_since_earliest, 1800))
+        return max(today - dt.timedelta(days=days_ago), earliest)
+
+    @staticmethod
+    def _realistic_purchase_price(sipp_code: str) -> Decimal:
+        """SIPP segmentine göre kabaca gerçekçi satın alım fiyatı (TL, sentetik)."""
+        band = SIPP_PRICE_BANDS.get((sipp_code or "")[:2], DEFAULT_PRICE_BAND)
+        return Decimal(random.randint(*band))
+
+    @staticmethod
+    def _maintenance_aware_km(index: int) -> int:
+        """Araçların ~%30'unu bakım eşiğinin hemen altına yerleştirir ki Bakım
+        Merkezi seed'den itibaren gerçekçi bir uyarı listesiyle gelsin; kalanı
+        rastgele (çoğunlukla sağlıklı) km'de kalır.
+
+        Not: Bakım Merkezi artık "son bakım kaydından bu yana" km/gün'e göre
+        çalışıyor (bkz. maintenance_service.py) — burada henüz bir
+        ``VEHICLE_MAINTENANCE`` gider kaydı seed'lenmediği için bu heuristik
+        yalnızca kabaca gerçekçi bir km dağılımı sağlar, kesin uyarı/sağlıklı
+        eşiğini artık garanti etmez (bu ayrı bir demo-veri zenginleştirmesi).
+        """
+        if index % 3 == 0:
+            interval = random.randint(1, 16) * MAINTENANCE_DUE_KM
+            return max(1_000, interval - random.randint(200, 950))
+        return random.randint(5_000, 250_000)
+
+    @transaction.atomic
+    def _seed_drivers(self, faker: Faker, company: Company, count: int) -> list[Driver]:
+        self.stdout.write(f"Creating {count} drivers...")
+        genders = [Gender.MALE, Gender.FEMALE, Gender.OTHER]
+        cities = ("Ankara", "İstanbul", "İzmir", "Bursa", "Antalya", "Konya")
+        license_classes = ("B", "B", "B", "BE", "C")
+        drivers: list[Driver] = []
+        for _ in range(count):
+            gender = random.choice(genders)
+            if gender == Gender.MALE:
+                first = faker.first_name_male()
+            elif gender == Gender.FEMALE:
+                first = faker.first_name_female()
+            else:
+                first = faker.first_name()
+            drivers.append(
+                Driver(
+                    company=company,
+                    first_name=first,
+                    last_name=faker.last_name(),
+                    national_id=faker.unique.numerify("###########"),
+                    gender=gender,
+                    birth_date=faker.date_of_birth(minimum_age=22, maximum_age=65),
+                    phone=faker.numerify("05## ### ## ##"),
+                    email=faker.email(),
+                    license_number=faker.unique.bothify(text="??######"),
+                    license_class=random.choice(license_classes),
+                    city=random.choice(cities),
+                    district=faker.city_suffix(),
+                    address=faker.street_address()[:255],
+                    is_blacklisted=random.random() < 0.03,
+                )
+            )
+        Driver.objects.bulk_create(drivers)
+        created = list(Driver.objects.filter(company=company).order_by("-id")[:count])
+        # bulk_create Django sinyallerini (post_save) TETİKLEMEZ — normal
+        # "Sürücü Ekle" akışının aksine (bkz. customer_profiles/signals.py),
+        # bu yüzden risk skoru burada AÇIKÇA hesaplanmazsa seed'lenen her
+        # sürücü kalıcı olarak skorsuz kalır.
+        service = DriverEvaluationService()
+        for driver in created:
+            service.evaluate(driver)
+        return created
+
+    def _seed_rentals(
+        self, faker: Faker, drivers: list[Driver], vehicles: list[Vehicle]
+    ) -> None:
+        """Kiralama geçmişini tüm senaryolarla doldur.
+
+        Kapsanan durumlar: Aktif (düz + uzatılmış), Gelecek, İptal (gelecek),
+        ve Geçmiş — zamanında / erken teslim alınan / geç teslim alınan üçlü
+        ayrımı. Her kayıtta ``daily_rate``/``original_ended_at`` doldurulur ki
+        fiyat farkı hesapları ve 3'lü geçmiş ayrımı gerçek verilerle test
+        edilebilsin.
+        """
+        self.stdout.write("Linking drivers to vehicles via rentals (all scenarios)...")
+        now = timezone.now()
+        available_drivers = drivers.copy()
+        random.shuffle(available_drivers)
+        available_vehicles_pool = [v for v in vehicles if v.status == VehicleStatus.AVAILABLE]
+        random.shuffle(available_vehicles_pool)
+        rentals: list[Rental] = []
+
+        def pop_driver() -> Driver | None:
+            if available_drivers:
+                return available_drivers.pop()
+            return random.choice(drivers) if drivers else None
+
+        def daily_rate() -> Decimal:
+            return Decimal(random.choice(DAILY_RATE_CHOICES))
+
+        # 1) AKTİF — şu an kirada olan araçlar. Bir kısmı düz (uzatılmamış),
+        #    bir kısmı zaten uzatılmış (original_ended_at != ended_at) olsun ki
+        #    "Uzat" ve "uzatma sonrası geç teslim" akışları canlı veriyle
+        #    test edilebilsin.
+        rented_vehicles = [v for v in vehicles if v.status == VehicleStatus.RENTED]
+        for i, vehicle in enumerate(rented_vehicles):
+            driver = pop_driver()
+            if driver is None:
+                break
+            rate = daily_rate()
+            days_ago = random.randint(1, 12)
+            duration = random.randint(3, 12)
+            started_at = now - dt.timedelta(days=days_ago)
+            original_ended_at = started_at + dt.timedelta(days=duration)
+            ended_at = original_ended_at
+            if i % 4 == 0:  # ~%25'i zaten uzatılmış olsun
+                ended_at = original_ended_at + dt.timedelta(days=random.randint(1, 5))
+            start_km = max(0, vehicle.current_km - random.randint(200, 3_000))
+            rentals.append(
+                Rental(
+                    driver=driver,
+                    vehicle=vehicle,
+                    company_id=driver.company_id,
+                    status=RentalStatus.ACTIVE,
+                    started_at=started_at,
+                    ended_at=ended_at,
+                    original_ended_at=original_ended_at,
+                    start_km=start_km,
+                    daily_rate=rate,
+                    quoted_total=rate * duration,
+                )
+            )
+
+        # 2) GELECEK — henüz başlamamış, ileri tarihli kiralamalar.
+        future_count = min(10, len(available_vehicles_pool))
+        future_vehicles = [available_vehicles_pool.pop() for _ in range(future_count)]
+        for vehicle in future_vehicles:
+            driver = pop_driver()
+            if driver is None:
+                break
+            rate = daily_rate()
+            duration = random.randint(2, 10)
+            started_at = now + dt.timedelta(days=random.randint(1, 21))
+            ended_at = started_at + dt.timedelta(days=duration)
+            rentals.append(
+                Rental(
+                    driver=driver,
+                    vehicle=vehicle,
+                    company_id=driver.company_id,
+                    status=RentalStatus.ACTIVE,
+                    started_at=started_at,
+                    ended_at=ended_at,
+                    original_ended_at=ended_at,
+                    start_km=vehicle.current_km,
+                    daily_rate=rate,
+                    quoted_total=rate * duration,
+                )
+            )
+
+        # 3) İPTAL — gelecekte iptal edilmiş kiralamalar (fiyat farkı yoktur).
+        cancel_count = min(4, len(available_vehicles_pool))
+        cancel_vehicles = [available_vehicles_pool.pop() for _ in range(cancel_count)]
+        for vehicle in cancel_vehicles:
+            driver = pop_driver()
+            if driver is None:
+                break
+            rate = daily_rate()
+            duration = random.randint(2, 8)
+            started_at = now + dt.timedelta(days=random.randint(2, 15))
+            ended_at = started_at + dt.timedelta(days=duration)
+            rentals.append(
+                Rental(
+                    driver=driver,
+                    vehicle=vehicle,
+                    company_id=driver.company_id,
+                    status=RentalStatus.CANCELLED,
+                    started_at=started_at,
+                    ended_at=ended_at,
+                    original_ended_at=ended_at,
+                    start_km=vehicle.current_km,
+                    daily_rate=rate,
+                    quoted_total=rate * duration,
+                )
+            )
+
+        # 4) GEÇMİŞ — zamanında / erken teslim alınan / geç teslim alınan
+        #    üçlü ayrımını eşit ağırlıkla kapsayacak şekilde dağıt. Tamamlanmış
+        #    kayıtlar hiçbir canlı çakışma yaratmaz, bu yüzden yukarıdaki
+        #    havuzdan değil filonun tamamından (durumu ne olursa olsun) örneklenir.
+        history_pool = vehicles.copy()
+        random.shuffle(history_pool)
+        history_count = min(24, len(history_pool))
+        history_vehicles = history_pool[:history_count]
+        outcomes = ["ON_TIME", "EARLY", "LATE"]
+        for idx, vehicle in enumerate(history_vehicles):
+            if not drivers:
+                break
+            driver = random.choice(drivers)
+            rate = daily_rate()
+            duration = random.randint(2, 10)
+            ended_days_ago = random.randint(3, 60)
+            original_ended_at = now - dt.timedelta(days=ended_days_ago)
+            start_at = original_ended_at - dt.timedelta(days=duration)
+            start_km = max(0, vehicle.current_km - random.randint(500, 8_000))
+
+            outcome = outcomes[idx % 3]
+            if outcome == "ON_TIME":
+                actual_return_at = original_ended_at + dt.timedelta(minutes=random.randint(0, 90))
+                price_difference = Decimal("0")
+                return_status = ReturnStatus.ON_TIME
+            elif outcome == "EARLY":
+                early_days = random.randint(1, max(duration - 1, 1))
+                actual_return_at = original_ended_at - dt.timedelta(days=early_days)
+                price_difference = -(rate * early_days)
+                return_status = ReturnStatus.EARLY
+            else:
+                late_days = random.randint(1, 5)
+                actual_return_at = original_ended_at + dt.timedelta(days=late_days, hours=3)
+                price_difference = (rate * late_days * LATE_PENALTY_MULTIPLIER).quantize(Decimal("0.01"))
+                return_status = ReturnStatus.LATE
+
+            rentals.append(
+                Rental(
+                    driver=driver,
+                    vehicle=vehicle,
+                    # bulk_create() Rental.save()'i (ve onun company
+                    # auto-fill mantığını) ATLAR — burada elle set edilmeli.
+                    company_id=driver.company_id,
+                    status=RentalStatus.COMPLETED,
+                    started_at=start_at,
+                    ended_at=original_ended_at,
+                    original_ended_at=original_ended_at,
+                    actual_return_at=actual_return_at,
+                    return_status=return_status,
+                    price_difference=price_difference,
+                    start_km=start_km,
+                    end_km=vehicle.current_km - random.randint(0, 500),
+                    daily_rate=rate,
+                    quoted_total=rate * duration,
+                )
+            )
+
+        with transaction.atomic():
+            Rental.objects.bulk_create(rentals)
+        self.stdout.write(
+            f"  + {len(rentals)} rental records created "
+            f"(active={len(rented_vehicles)}, future={len(future_vehicles)}, "
+            f"cancelled={len(cancel_vehicles)}, history={len(history_vehicles)})"
+        )
+
+    @transaction.atomic
+    def _seed_financing(self, companies: list[Company], vehicles: list[Vehicle]) -> None:
+        """Sentetik finansman/sigorta/genel gider verisi.
+
+        Gerçek kredi/finansman/genel gider verisi henüz yok — bu proje için
+        bilinçli olarak MALIYET_HESAPLAMA_METODOLOJISI §11'deki mantığa
+        benzer, sabit seed'le tutarlı sentetik veri üretilir (finansman tipi
+        dağılımı dokümanla birebir aynı: %35 Nakit / %50 Kredi / %15 Karma).
+        Gerçek veri entegre edildiğinde bu metod tamamen devre dışı
+        bırakılabilir; hesaplama mantığının kendisi (cost_calculation
+        servisleri) değişmez.
+        """
+        from backend.apps.vehicle_finance.choices import FinancingType, InsurancePolicyType
+        from backend.apps.vehicle_finance.models import (
+            CompanyOverheadExpense,
+            CostCalculationSettings,
+            InsurancePolicy,
+            Loan,
+            LoanVehicleAllocation,
+            VehicleFinancialProfile,
+        )
+        from backend.apps.vehicles.models import VehicleCondition
+        from backend.infrastructure.services.cost_calculation.credit_interest_service import (
+            generate_amortization_schedule,
+        )
+
+        self.stdout.write("Seeding financing/insurance/overhead demo data...")
+        today = dt.date.today()
+
+        # 1) Şirket başına maliyet ayarları + sentetik kredi havuzu (2-4 kredi/şirket).
+        company_loans: dict[int, list[Loan]] = {}
+        for company in companies:
+            CostCalculationSettings.objects.get_or_create(company=company)
+            loans = [
+                Loan.objects.create(
+                    company=company,
+                    lender_name=random.choice(LOAN_LENDER_NAMES),
+                    principal_amount=Decimal(random.randint(2_000_000, 8_000_000)),
+                    monthly_interest_rate=Decimal(str(round(random.uniform(0.025, 0.045), 5))),
+                    term_months=random.choice(LOAN_TERM_CHOICES),
+                    start_date=today - dt.timedelta(days=random.randint(180, 1200)),
+                )
+                for _ in range(random.randint(2, 4))
+            ]
+            company_loans[company.id] = loans
+
+        # 2) Araç başına finansman profili + (varsa) kredi tahsisi.
+        profiles: list[VehicleFinancialProfile] = []
+        allocations: list[LoanVehicleAllocation] = []
+        touched_loan_ids: set[int] = set()
+
+        for vehicle in vehicles:
+            if vehicle.fleet_entry_date is None or vehicle.purchase_price is None:
+                continue
+
+            financing_type = random.choices(
+                [FinancingType.CASH, FinancingType.LOAN, FinancingType.MIXED],
+                weights=FINANCING_TYPE_WEIGHTS,
+                k=1,
+            )[0]
+            purchase_price = Decimal(vehicle.purchase_price)
+            loans_for_company = company_loans.get(vehicle.company_id) or []
+            cash_amount = purchase_price
+            chosen_loan: Loan | None = None
+            loan_amount = Decimal("0")
+
+            if loans_for_company and financing_type in (FinancingType.LOAN, FinancingType.MIXED):
+                chosen_loan = random.choice(loans_for_company)
+                loan_share = (
+                    Decimal("1")
+                    if financing_type == FinancingType.LOAN
+                    else Decimal(str(round(random.uniform(0.4, 0.7), 2)))
+                )
+                loan_amount = (purchase_price * loan_share).quantize(Decimal("0.01"))
+                cash_amount = (purchase_price - loan_amount).quantize(Decimal("0.01"))
+
+            profiles.append(
+                VehicleFinancialProfile(
+                    vehicle=vehicle,
+                    purchase_date=vehicle.fleet_entry_date,
+                    purchase_price=purchase_price,
+                    condition=VehicleCondition.NEW,
+                    financing_type=financing_type,
+                    cash_financed_amount=cash_amount,
+                )
+            )
+            if chosen_loan is not None and loan_amount > 0:
+                allocations.append(
+                    LoanVehicleAllocation(loan=chosen_loan, vehicle=vehicle, financed_amount=loan_amount)
+                )
+                touched_loan_ids.add(chosen_loan.id)
+
+        VehicleFinancialProfile.objects.bulk_create(profiles)
+        LoanVehicleAllocation.objects.bulk_create(allocations)
+
+        for loans in company_loans.values():
+            for loan in loans:
+                if loan.id in touched_loan_ids:
+                    generate_amortization_schedule(loan)
+
+        # 3) Sigorta poliçeleri — KASKO + TRAFİK zorunlu, YEŞİL KART %10 ihtimalle
+        #    (doküman §11'deki sentetik yüzdeler: kasko %4-7, trafik %1-2, 12 aylık
+        #    dönemler zincirlenerek bugüne kadar getirilir).
+        policies: list[InsurancePolicy] = []
+        for vehicle in vehicles:
+            if vehicle.fleet_entry_date is None or vehicle.purchase_price is None:
+                continue
+            purchase_price = Decimal(vehicle.purchase_price)
+            policy_specs: list[tuple[str, float | None]] = [
+                (InsurancePolicyType.COMPREHENSIVE, round(random.uniform(0.04, 0.07), 4)),
+                (InsurancePolicyType.LIABILITY, round(random.uniform(0.01, 0.02), 4)),
+            ]
+            if random.random() < 0.10:
+                policy_specs.append((InsurancePolicyType.GREEN_CARD, None))
+
+            for policy_type, pct in policy_specs:
+                amount = (
+                    Decimal(random.randint(4_000, 15_000))
+                    if pct is None
+                    else (purchase_price * Decimal(str(pct))).quantize(Decimal("0.01"))
+                )
+                period_start = vehicle.fleet_entry_date
+                while period_start <= today:
+                    period_end = period_start + dt.timedelta(days=365)
+                    policies.append(
+                        InsurancePolicy(
+                            vehicle=vehicle,
+                            policy_type=policy_type,
+                            amount=amount,
+                            start_date=period_start,
+                            end_date=period_end,
+                        )
+                    )
+                    period_start = period_end
+        InsurancePolicy.objects.bulk_create(policies)
+
+        # 4) Genel gider — demo amaçlı, son 180 gün (gerçek veri
+        #    `import_overhead_expenses` komutuyla gelir, bu sadece dev/demo).
+        overhead_rows: list[CompanyOverheadExpense] = []
+        for company in companies:
+            fleet_size = sum(1 for v in vehicles if v.company_id == company.id)
+            base_daily = Decimal(max(5_000, fleet_size * 80))
+            for days_ago in range(180):
+                expense_date = today - dt.timedelta(days=days_ago)
+                amount = (base_daily * Decimal(str(round(random.uniform(0.85, 1.15), 2)))).quantize(
+                    Decimal("0.01")
+                )
+                overhead_rows.append(
+                    CompanyOverheadExpense(
+                        company=company,
+                        expense_date=expense_date,
+                        amount=amount,
+                        category="Genel İşletme (demo)",
+                        source_note="seed_data demo verisi",
+                    )
+                )
+        CompanyOverheadExpense.objects.bulk_create(overhead_rows, ignore_conflicts=True)
+
+        self.stdout.write(
+            f"  + {len(profiles)} finansal profil, {len(allocations)} kredi tahsisi "
+            f"({len(touched_loan_ids)} kredi kullanımda), {len(policies)} sigorta poliçesi, "
+            f"{len(overhead_rows)} genel gider kaydı"
+        )
+
+    @staticmethod
+    def _fake_plate(faker: Faker) -> str:
+        """Generate a unique Turkish-style plate, e.g. '06 ABC 123'."""
+        province = random.randint(1, 81)
+        letters = "".join(random.choices("ABCDEFGHIJKLMNPRSTUVYZ", k=3))
+        digits = faker.unique.numerify("###")
+        return f"{province:02d} {letters} {digits}"
+
+    # ------------------------------------------------------------------
+    # Analytics (ClickHouse) seeding
+    # ------------------------------------------------------------------
+    def _seed_telemetry(self, vehicles: list[Vehicle], logs_per_vehicle: int) -> None:
+        total = len(vehicles) * logs_per_vehicle
+        self.stdout.write(
+            f"Generating ~{total:,} telemetry logs for {len(vehicles)} vehicles "
+            f"into ClickHouse table '{TELEMETRY_TABLE}'..."
+        )
+
+        try:
+            with suppress_http_warnings():
+                ensure_database()
+                apply_schema()
+                client = get_clickhouse_client()
+
+                inserted = 0
+                for batch in self._batched(self._all_trajectories(vehicles, logs_per_vehicle),
+                                           CLICKHOUSE_INSERT_BATCH):
+                    client.insert(
+                        TELEMETRY_TABLE,
+                        batch,
+                        column_names=list(TELEMETRY_COLUMNS),
+                    )
+                    inserted += len(batch)
+                    self.stdout.write(f"  inserted {inserted:,}/{total:,} rows", ending="\r")
+        except OperationalError:
+            # ClickHouse is unreachable (e.g. server down / connection refused
+            # on port 8123). Relational seeding already succeeded, so we warn
+            # and exit cleanly instead of crashing the whole command.
+            self.stdout.write("")  # break out of the carriage-return line
+            self.stdout.write(
+                self.style.WARNING("ClickHouse not running, skipping telemetry insert")
+            )
+            return
+
+        self.stdout.write("")  # newline after the progress carriage-returns
+        self.stdout.write(self.style.SUCCESS(f"Inserted {inserted:,} telemetry rows."))
+
+    def _all_trajectories(
+        self, vehicles: list[Vehicle], logs_per_vehicle: int
+    ) -> Iterator[tuple[Any, ...]]:
+        """Yield telemetry rows for every vehicle, one coherent trajectory each."""
+        for vehicle in vehicles:
+            yield from self._build_vehicle_trajectory(vehicle, logs_per_vehicle)
+
+    @staticmethod
+    def _build_vehicle_trajectory(
+        vehicle: Vehicle, log_count: int
+    ) -> Iterator[tuple[Any, ...]]:
+        """Generate a single vehicle's correlated telemetry as row tuples.
+
+        Coordinates random-walk around Ankara, fuel drains while driving and
+        refuels near empty, and speed varies enough to trigger violations and
+        harsh-braking events.
+        """
+        device_id = vehicle.pk
+        latitude, longitude = ANKARA_CENTER
+        latitude += random.uniform(-0.05, 0.05)
+        longitude += random.uniform(-0.05, 0.05)
+        fuel_level = random.uniform(60.0, 100.0)
+        # Each vehicle has its own comfortable cruising speed to revert toward.
+        cruise_target = random.uniform(50.0, 85.0)
+        previous_speed = cruise_target
+
+        # Walk backwards in time so the newest ping is "now" (naive UTC, which
+        # is what the ClickHouse DateTime column stores).
+        now_utc = dt.datetime.now(dt.UTC).replace(tzinfo=None)
+        start_time = now_utc - dt.timedelta(seconds=log_count * TELEMETRY_INTERVAL_SECONDS)
+
+        for step in range(log_count):
+            timestamp = start_time + dt.timedelta(seconds=step * TELEMETRY_INTERVAL_SECONDS)
+
+            # GPS random walk (~tens of meters per step).
+            latitude += random.uniform(-0.0009, 0.0009)
+            longitude += random.uniform(-0.0009, 0.0009)
+
+            # Speed model: mostly mean-reverting toward the vehicle's cruise
+            # target, with rare hard brakes and rare highway bursts. The bursts
+            # are what occasionally breach the 120 km/h violation threshold.
+            roll = random.random()
+            if roll < 0.03:  # sudden hard deceleration -> harsh_brake
+                speed = max(0.0, previous_speed - random.uniform(35.0, 60.0))
+            elif roll < 0.06:  # highway burst, may exceed the limit
+                speed = min(160.0, previous_speed + random.uniform(30.0, 55.0))
+            else:  # normal cruising
+                reversion = (cruise_target - previous_speed) * 0.2
+                speed = max(0.0, min(160.0, previous_speed + reversion + random.uniform(-10.0, 10.0)))
+
+            # Fuel drains with distance/speed; refuel when low.
+            fuel_level -= speed * 0.0015 + random.uniform(0.0, 0.05)
+            if fuel_level <= 5.0:
+                fuel_level = random.uniform(90.0, 100.0)
+
+            event_type = Command._classify_event(speed, previous_speed)
+            previous_speed = speed
+
+            yield (
+                device_id,
+                timestamp,
+                round(speed, 2),
+                round(max(0.0, fuel_level), 2),
+                round(latitude, 6),
+                round(longitude, 6),
+                event_type,
+            )
+
+    @staticmethod
+    def _classify_event(speed: float, previous_speed: float) -> str:
+        """Derive an event_type from the speed profile (with some randomness)."""
+        if speed > 120.0:
+            return "speed_violation"
+        if previous_speed - speed > 30.0:
+            return "harsh_brake"
+        if speed - previous_speed > 25.0:
+            return "harsh_acceleration"
+        # Rare random geofence breach to populate the category.
+        if random.random() < 0.01:
+            return "geofence_out"
+        return "normal"
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _batched(rows: Iterable[tuple[Any, ...]], size: int) -> Iterator[list[tuple[Any, ...]]]:
+        """Chunk an iterable of rows into lists of at most ``size`` items."""
+        batch: list[tuple[Any, ...]] = []
+        for row in rows:
+            batch.append(row)
+            if len(batch) >= size:
+                yield batch
+                batch = []
+        if batch:
+            yield batch
+
+    def _flush(self, skip_telemetry: bool = False) -> None:
+        self.stdout.write(self.style.WARNING("Flushing existing seeded data..."))
+        from backend.apps.enuygun.models import CompetitorPrice
+        from backend.apps.vehicle_finance.models import (
+            CompanyOverheadExpense,
+            CostCalculationSettings,
+            InsurancePolicy,
+            Loan,
+            LoanInstallment,
+            LoanVehicleAllocation,
+            RentalIncome,
+            VehicleExpense,
+            VehicleFinancialProfile,
+        )
+
+        # Yeni maliyet-hesabı modelleri Vehicle/Company'ye CASCADE bağlı
+        # olduğu için aşağıdaki silmeler teknik olarak otomatik yayılır;
+        # yine de büyük veri setlerinde Python-side cascade toplama yerine
+        # doğrudan toplu silme daha hızlı ve niyet daha açık.
+        LoanInstallment.objects.all().delete()
+        LoanVehicleAllocation.objects.all().delete()
+        Loan.objects.all().delete()
+        InsurancePolicy.objects.all().delete()
+        CompanyOverheadExpense.objects.all().delete()
+        CostCalculationSettings.objects.all().delete()
+        VehicleExpense.objects.all().delete()
+        RentalIncome.objects.all().delete()
+        VehicleFinancialProfile.objects.all().delete()
+        CompetitorPrice.objects.all().delete()
+        Vehicle.objects.all().delete()
+        Driver.objects.all().delete()
+        CustomUser.objects.filter(
+            username__in=("mudur", "operasyon"),
+        ).delete()
+        Company.objects.all().delete()
+        if skip_telemetry:
+            return
+        try:
+            with suppress_http_warnings():
+                ensure_database()
+                apply_schema()
+                get_clickhouse_client().command(f"TRUNCATE TABLE IF EXISTS {TELEMETRY_TABLE}")
+        except OperationalError:
+            self.stdout.write(
+                self.style.WARNING("ClickHouse not running, skipping telemetry flush")
+            )

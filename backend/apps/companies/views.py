@@ -8,10 +8,11 @@ from rest_framework.authtoken.models import Token
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
-from backend.common.multitenancy_tools.branding import company_branding_payload
 from backend.apps.companies.models import CustomUser
+from backend.common.multitenancy_tools.branding import company_branding_payload
 
 
 def _user_payload(user: CustomUser) -> dict:
@@ -32,6 +33,11 @@ def _user_payload(user: CustomUser) -> dict:
 
 class LoginView(APIView):
     permission_classes = (AllowAny,)
+    # Genel "anon" limitinden (100/dk) ayrı, çok daha sıkı bir sınır — bu
+    # endpoint kimlik doğrulaması OLMADAN çağrılabildiği için kaba kuvvet
+    # denemelerine karşı en kritik nokta.
+    throttle_classes = (ScopedRateThrottle,)
+    throttle_scope = "login"
 
     def post(self, request: Request) -> Response:
         username = request.data.get("username", "")

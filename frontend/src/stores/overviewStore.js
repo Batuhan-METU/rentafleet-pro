@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import apiClient from '../services/api.js'
 
 const ALLOWED_STAT_KEYS = new Set([
-  'net_kazanc',
+  'yillik_gider',
   'yillik_gelir',
   'net_kar',
   'kiralama_sayisi',
@@ -10,7 +10,7 @@ const ALLOWED_STAT_KEYS = new Set([
 ])
 
 const STAT_ORDER = [
-  'net_kazanc',
+  'yillik_gider',
   'yillik_gelir',
   'net_kar',
   'kiralama_sayisi',
@@ -18,7 +18,7 @@ const STAT_ORDER = [
 ]
 
 const STAT_ALIASES = {
-  net_kazanc: ['net_kazanc', 'yillik_net_kar'],
+  yillik_gider: ['yillik_gider'],
   yillik_gelir: ['yillik_gelir', 'toplam_gelir'],
   net_kar: ['net_kar', 'biriken_kar'],
   kiralama_sayisi: ['kiralama_sayisi'],
@@ -26,14 +26,14 @@ const STAT_ALIASES = {
 }
 
 const STAT_LABELS = {
-  net_kazanc: 'Net Kazanç',
+  yillik_gider: 'Yıllık Gider',
   yillik_gelir: 'Yıllık Gelir',
   net_kar: 'Net Kar',
   kiralama_sayisi: 'Toplam Kiralama',
   kiralanan_gun: 'Kiralanan Gün',
 }
 
-function pickStat(rows, keys, fallbackKey) {
+function pickStat(rows, keys) {
   const byKey = Object.fromEntries(rows.map((r) => [r.anahtar, r]))
   for (const key of keys) {
     if (byKey[key]) return byKey[key]
@@ -43,7 +43,7 @@ function pickStat(rows, keys, fallbackKey) {
 
 function normalizeStats(rows) {
   return STAT_ORDER.map((key) => {
-    const found = pickStat(rows, STAT_ALIASES[key], key)
+    const found = pickStat(rows, STAT_ALIASES[key])
     if (found) {
       return { ...found, etiket: STAT_LABELS[key], anahtar: key }
     }

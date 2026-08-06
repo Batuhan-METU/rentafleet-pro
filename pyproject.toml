@@ -1,0 +1,41 @@
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+extend-exclude = ["frontend", "datas", "*/migrations/*"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes (unused imports/vars, undefined names)
+    "I",   # isort (import ordering)
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear (common bug patterns)
+]
+ignore = [
+    "E501", # line length is a formatter concern, not a lint error here
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["backend"]
+
+[tool.ruff.lint.per-file-ignores]
+# sys.path bootstrap her zaman ilk satırlarda olmalı — Django'yu import
+# etmeden ÖNCE proje kökünü path'e eklemek bu dosyaların amacı.
+"backend/wsgi.py" = ["E402"]
+"backend/asgi.py" = ["E402"]
+# `dict(zip(header, row))` — Excel satırının sütun sayısı başlıktan az/çok
+# olabilir (boş takip eden hücreler openpyxl'de hiç okunmaz); `strict=True`
+# eklemek gerçek üretim Excel dosyalarına karşı doğrulanmadan bu içe aktarma
+# komutlarını kırma riski taşır (bkz. audit — "asla işlevselliği bozma").
+"backend/apps/vehicle_finance/management/commands/seed_real_vehicle_financials.py" = ["B905"]
+"backend/apps/vehicles/management/commands/backfill_vehicle_details.py" = ["B905"]
+"backend/apps/vehicles/management/commands/import_fleet_vehicles.py" = ["B905"]
+
+[tool.mypy]
+plugins = ["mypy_django_plugin.main"]
+python_version = "3.13"
+ignore_missing_imports = true
+exclude = ["migrations/"]
+
+[tool.django-stubs]
+django_settings_module = "backend.settings"

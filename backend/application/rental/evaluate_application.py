@@ -9,8 +9,12 @@ from django.db import transaction
 
 from backend.application.customer.snapshots import build_customer_snapshot, ensure_customer_profiles
 from backend.application.driver.persist_risk import persist_driver_risk_result
+from backend.apps.companies.models import (
+    Company,
+    CustomUser,
+)
 from backend.apps.customer_profiles.models import Driver
-from backend.apps.reservations.choices import RentalStatus
+from backend.apps.rentals.choices import RentalStatus
 from backend.apps.risk_checks.evaluation import evaluate_customer_risk
 from backend.apps.risk_checks.models import (
     CustomerRiskSnapshot,
@@ -20,11 +24,6 @@ from backend.apps.risk_checks.models import (
     RentalDecisionLog,
     RuleEngineType,
 )
-from backend.apps.companies.models import (
-    Company,
-    CustomUser,
-)
-
 from backend.domain.shared.types import EvaluateRentalResult
 
 
@@ -93,6 +92,7 @@ class RentalApplicationService:
                 "audit": bundle.audit,
                 "eligible_vehicles": list(bundle.vehicles),
                 "deposit_amount": bundle.deposit,
+                "deposit_percent": bundle.deposit_percent,
             },
         )
 

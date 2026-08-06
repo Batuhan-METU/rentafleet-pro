@@ -16,21 +16,23 @@ from django.db import transaction
 from rest_framework.exceptions import ValidationError
 
 from backend.application.customer.rental_stats import sync_rental_history_stats
-from backend.apps.floor_pricing.models import RentalIncome
-from backend.apps.reservations.models import Rental, RentalStatus, ReturnStatus
+from backend.application.driver.evaluate_driver import DriverEvaluationService
+from backend.apps.rentals.models import Rental, RentalStatus, ReturnStatus
+from backend.apps.vehicle_finance.models import RentalIncome
 from backend.apps.vehicles.models import VehicleStatus
-from backend.infrastructure.services.pricing.rental_economics_service import build_vehicle_cost_card
+from backend.infrastructure.services.cost_calculation.rental_economics_service import (
+    current_daily_cost,
+)
+from backend.infrastructure.services.cost_calculation.rounding import TWO_PLACES
 
 # Rötar toleransı: bu süreye kadarki gecikmeler ücretsizdir (ON_TIME sayılır).
 LATE_GRACE_HOURS = 2
 # Tolerans sonrası her ek gün için uygulanan aşım cezası katsayısı.
 LATE_PENALTY_MULTIPLIER = Decimal("1.25")
 
-_CENTS = Decimal("0.01")
-
 
 def _money(value: Decimal) -> Decimal:
-    return value.quantize(_CENTS, rounding=ROUND_HALF_UP)
+    return value.quantize(TWO_PLACES, rounding=ROUND_HALF_UP)
 
 
 @dataclass(frozen=True)
@@ -47,13 +49,17 @@ def _daily_rate(rental: Rental) -> Decimal:
     if rental.daily_rate:
         return Decimal(rental.daily_rate)
 
+    # `ended_at` modelde null=True (bkz. Rental) ama bu fonksiyona yalnızca
+    # ACTIVE (dolayısıyla her zaman bir bırakış tarihi belirlenmiş) kiralamalar
+    # gelir — bu invariant'ı açıkça doğrular (sessizce varsaymak yerine).
+    assert rental.ended_at is not None, "Aktif bir kiralamanın ended_at'i ayarlı olmalı"
     total_days = max((rental.ended_at - rental.started_at).days, 1)
     if rental.quoted_total:
         return Decimal(rental.quoted_total) / total_days
 
-    card = build_vehicle_cost_card(rental.vehicle)
-    if card is not None:
-        return Decimal(str(card.daily_cost))
+    daily = current_daily_cost(rental.vehicle)
+    if daily is not None:
+        return Decimal(str(daily))
     return Decimal("0")
 
 
@@ -70,6 +76,7 @@ def compute_return_settlement(rental: Rental, actual_return_at: datetime) -> Ret
     DB'ye yazmaz — hem önizleme hem ``process_vehicle_return`` commit adımı
     tarafından çağrılan saf bir fonksiyondur.
     """
+    assert rental.ended_at is not None, "Aktif bir kiralamanın ended_at'i ayarlı olmalı"
     daily_rate = _daily_rate(rental)
     original_ended_at = rental.original_ended_at or rental.ended_at
     planned_ended_at = rental.ended_at
@@ -160,11 +167,12 @@ def extend_active_rental(rental: Rental, new_ended_at: datetime) -> Rental:
 
     ``original_ended_at`` (ilk sözleşme taahhüdü) hiç değişmez — yalnızca
     ``ended_at`` ileri taşınır, kiralama ötelenen tarihe kadar Aktif kalır.
-    Aracın yeni tarih aralığında başka bir aktif rezervasyonu varsa uzatma
+    Aracın yeni tarih aralığında başka bir aktif kiralaması varsa uzatma
     reddedilir.
     """
     if rental.status != RentalStatus.ACTIVE:
-        raise ValidationError({"error": "Yalnızca aktif rezervasyonlar uzatılabilir."})
+        raise ValidationError({"error": "Yalnızca aktif kiralamalar uzatılabilir."})
+    assert rental.ended_at is not None, "Aktif bir kiralamanın ended_at'i ayarlı olmalı"
     if new_ended_at <= rental.ended_at:
         raise ValidationError(
             {"error": "Yeni tarih, mevcut bırakış tarihinden sonra olmalıdır."}
@@ -181,7 +189,7 @@ def extend_active_rental(rental: Rental, new_ended_at: datetime) -> Rental:
     )
     if conflict:
         raise ValidationError(
-            {"error": "Bu araç için seçilen tarihte başka bir rezervasyon var, uzatma yapılamaz."}
+            {"error": "Bu araç için seçilen tarihte başka bir kiralama var, uzatma yapılamaz."}
         )
 
     if rental.original_ended_at is None:
@@ -203,9 +211,23 @@ def process_vehicle_return(
 
     Kapatma: Rental → COMPLETED, Vehicle → AVAILABLE (aynı anda — takvimdeki
     çakışma kontrolleri yalnızca ACTIVE kayıtlara baktığı için araç otomatik
-    olarak yeni rezervasyonlara açılır), fark varsa RentalIncome ayarlama
+    olarak yeni kiralamalara açılır), fark varsa RentalIncome ayarlama
     kaydı, sürücü geçmiş istatistiklerinin senkronizasyonu.
     """
+    if not preview:
+        # Yarış durumu koruması: satırı KİLİTLE ve durumu TEKRAR kontrol et.
+        # Kilit olmadan, aynı kiralama için eşzamanlı iki "teslim al" isteği
+        # ikisi de ACTIVE görüp ikisi de bu fonksiyonu tamamlayabilirdi —
+        # @transaction.atomic tek başına bunu ENGELLEMEZ (yalnızca "hepsi ya
+        # da hiçbiri" garantisi verir, eşzamanlı İKİ transaction'ın ikisinin
+        # de çalışmasını değil) — sonuç: ÇİFT RentalIncome kaydı (gerçek
+        # parasal çift düzeltme) ve tutarsız araç durumu.
+        rental = Rental.objects.select_for_update().get(pk=rental.pk)
+        if rental.status != RentalStatus.ACTIVE:
+            raise ValidationError(
+                {"error": "Bu kiralama zaten teslim alınmış veya iptal edilmiş."}
+            )
+
     settlement = compute_return_settlement(rental, actual_return_at)
     if preview:
         return settlement
@@ -222,6 +244,7 @@ def process_vehicle_return(
     rental.vehicle.save(update_fields=["status"])
 
     if settlement.price_difference != 0:
+        assert rental.ended_at is not None, "Aktif bir kiralamanın ended_at'i ayarlı olmalı"
         window_start = min(rental.ended_at, actual_return_at).date()
         window_end = max(rental.ended_at, actual_return_at).date()
         if settlement.return_status == ReturnStatus.LATE:
@@ -245,4 +268,9 @@ def process_vehicle_return(
             )
 
     sync_rental_history_stats(rental.driver)
+    # Sürücünün risk skoru artık "canlı" — sadece sürücü eklenirken bir kez
+    # değil, her kiralama tamamlandığında güncel davranışına göre yeniden
+    # hesaplanır (yukarıdaki sync ile tazelenen total_rentals/late_return_
+    # count gibi istatistikler skora böylece gerçekten yansır).
+    DriverEvaluationService().evaluate(rental.driver)
     return settlement

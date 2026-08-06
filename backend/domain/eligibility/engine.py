@@ -1,13 +1,16 @@
-"""Araç uygunluk motoru — risk seviyesine göre segment."""
+"""Araç uygunluk motoru — risk seviyesine göre segment.
+
+Filodaki müsait araçları DB'den sorgulayıp öneri listesi kuran orkestrasyon
+(``recommend_vehicles``) burada DEĞİL, application katmanındadır (bkz.
+``backend.application.rental.driver_eligibility.recommend_vehicles``) —
+domain katmanı ORM/infrastructure'a dokunmaz (audit bulgusu #20).
+"""
 
 from __future__ import annotations
 
-from backend.domain.shared.enums import RiskLevel, VehicleTier
 from backend.apps.risk_checks.models import VehicleRiskTier
-from backend.apps.vehicles.models import (
-    Vehicle,
-    VehicleStatus,
-)
+from backend.apps.vehicles.models import Vehicle
+from backend.domain.shared.enums import RiskLevel, VehicleTier
 
 RISK_TO_ALLOWED_TIERS: dict[RiskLevel, frozenset[VehicleTier]] = {
     RiskLevel.VERY_LOW: frozenset({VehicleTier.PREMIUM, VehicleTier.STANDARD, VehicleTier.ECONOMY}),
@@ -47,46 +50,3 @@ def is_vehicle_eligible_for_risk_level(vehicle: Vehicle, risk_level: str) -> boo
         return False
 
     return infer_vehicle_tier(vehicle) in allowed
-
-
-def recommend_vehicles(
-    company_id: int,
-    risk_level: str,
-    *,
-    limit: int = 8,
-) -> list[dict]:
-    try:
-        level = RiskLevel(risk_level)
-    except ValueError:
-        return []
-
-    allowed = RISK_TO_ALLOWED_TIERS.get(level, frozenset())
-    if not allowed:
-        return []
-
-    vehicles = (
-        Vehicle.objects.filter(company_id=company_id, status=VehicleStatus.AVAILABLE)
-        .select_related("risk_tier")
-        .order_by("current_km")[:50]
-    )
-
-    results: list[dict] = []
-    for vehicle in vehicles:
-        tier = infer_vehicle_tier(vehicle)
-        if tier not in allowed:
-            continue
-        results.append(
-            {
-                "vehicle_id": vehicle.pk,
-                "plate_number": vehicle.plate_number,
-                "brand": vehicle.brand,
-                "model": vehicle.model,
-                "tier": tier,
-                "sipp_code": vehicle.sipp_code,
-                "reason": f"Risk {level.value} → {tier} segment uygun",
-            }
-        )
-        if len(results) >= limit:
-            break
-
-    return results

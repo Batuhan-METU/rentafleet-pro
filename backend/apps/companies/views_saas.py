@@ -10,13 +10,13 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from backend.common.multitenancy_tools.branding import company_branding_payload
-from backend.common.middleware.company_router import resolve_company_by_subdomain
 from backend.apps.companies.models import (
     Company,
     CustomUser,
     UserRole,
 )
+from backend.common.middleware.company_router import resolve_company_by_subdomain
+from backend.common.multitenancy_tools.branding import company_branding_payload
 from backend.common.permissions import IsSuperUser
 
 
@@ -84,6 +84,12 @@ class CreateNewCompanyView(APIView):
                 {"error": f"Zorunlu alanlar eksik: {', '.join(missing)}"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        # Yukarıdaki `missing` kontrolü hepsinin dolu olduğunu zaten
+        # doğruladı — bunlar mypy için de artık None değil.
+        assert company_name is not None
+        assert subdomain is not None
+        assert tax_number is not None
+        assert manager_username is not None
         if not isinstance(manager_password, str) or not manager_password:
             return Response(
                 {"error": "manager_password zorunludur."},
@@ -140,12 +146,12 @@ class CreateNewCompanyView(APIView):
 
         return Response(
             {
-                "mesaj": (
+                "message": (
                     "Şirket ve Müdür hesabı başarıyla aktifleştirildi. "
                     f"Giriş Adresi: {login_host}"
                 ),
-                "giris_adresi": login_host,
-                "giris_adresi_yerel": f"http://{subdomain}.localhost:5173",
+                "login_url": login_host,
+                "login_url_local": f"http://{subdomain}.localhost:5173",
                 "company": {
                     "id": company.pk,
                     "subdomain": subdomain,

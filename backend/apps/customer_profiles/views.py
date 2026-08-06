@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from django.db import IntegrityError
-from django.db.models import Prefetch, QuerySet
+from django.db import IntegrityError, transaction
+from django.db.models import Count, Prefetch, Q, QuerySet
 from rest_framework import status
 from rest_framework.generics import ListAPIView, RetrieveAPIView
 from rest_framework.request import Request
@@ -18,16 +18,26 @@ from backend.application.rental.driver_eligibility import (
     driver_has_risk_approval,
     is_driver_eligible_for_vehicle,
 )
-from backend.apps.customer_profiles.serializers import DriverCreateRequestSerializer, DriverSerializer
 from backend.apps.customer_profiles.models import Driver
+from backend.apps.customer_profiles.serializers import (
+    DriverCreateRequestSerializer,
+    DriverSerializer,
+)
+from backend.apps.rentals.models import Rental, RentalStatus
 from backend.apps.risk_checks.evaluation import RISK_LEVEL_LABELS
 from backend.apps.risk_checks.models import CustomerRiskSnapshot
-from backend.apps.reservations.models import Rental, RentalStatus
 from backend.apps.vehicles.models import VehicleLiveState
+from backend.common.multitenancy_tools.scope import (
+    get_scoped_driver,
+    get_scoped_vehicle,
+    scoped_drivers,
+)
 from backend.common.permissions import IsFleetStaff
-from backend.infrastructure.services.analytics.scoring_service import calculate_driver_score, driver_comment
-from backend.infrastructure.services.sipp.sipp_service import format_marka_model_sinif
-from backend.common.multitenancy_tools.scope import get_scoped_driver, get_scoped_vehicle, scoped_drivers
+from backend.infrastructure.services.analytics.scoring_service import (
+    calculate_driver_score,
+    driver_comment,
+)
+from backend.infrastructure.services.sipp.sipp_service import format_brand_model_segment
 
 
 def _active_rental_payload(driver: Driver) -> dict | None:
@@ -46,17 +56,17 @@ def _active_rental_payload(driver: Driver) -> dict | None:
     vehicle = rental.vehicle
     state: VehicleLiveState | None = getattr(vehicle, "live_state", None)
     return {
-        "kiralama_id": rental.pk,
-        "plaka": vehicle.plate_number,
-        "marka_model": f"{vehicle.brand} {vehicle.model}",
-        "marka_model_sinif": format_marka_model_sinif(
+        "rental_id": rental.pk,
+        "plate_number": vehicle.plate_number,
+        "brand_model": f"{vehicle.brand} {vehicle.model}",
+        "brand_model_segment": format_brand_model_segment(
             vehicle.brand, vehicle.model, vehicle.sipp_code
         ),
-        "guncel_km": vehicle.current_km,
-        "enlem": round(state.latitude, 6) if state else None,
-        "boylam": round(state.longitude, 6) if state else None,
-        "baslangic_km": rental.start_km,
-        "baslangic_tarihi": rental.started_at.isoformat(),
+        "current_km": vehicle.current_km,
+        "latitude": round(state.latitude, 6) if state else None,
+        "longitude": round(state.longitude, 6) if state else None,
+        "start_km": rental.start_km,
+        "started_at": rental.started_at.isoformat(),
     }
 
 
@@ -67,32 +77,32 @@ def _profile_summary(driver: Driver) -> dict:
     financial = getattr(driver, "financial_profile", None)
 
     return {
-        "kimlik_dogrulandi": bool(identity and identity.identity_verified),
-        "telefon_dogrulandi": bool(identity and identity.phone_verified),
-        "belge_suphesi": bool(identity and identity.document_fraud_suspicion),
-        "ehliyet_verilis": license_p.license_issue_date.isoformat() if license_p and license_p.license_issue_date else None,
-        "ehliyet_puani": license_p.license_points if license_p else 0,
-        "ehliyet_ceza_sayisi": license_p.license_penalty_count if license_p else 0,
-        "findeks_skoru": financial.findeks_score if financial else None,
-        "icra_kaydi": bool(financial and financial.has_enforcement_record),
-        "banka_kara_liste": bool(financial and financial.bank_blacklist_flag),
-        "odeme_gecikme": financial.payment_delay_count if financial else 0,
-        "meslek": driver.occupation or "",
-        "isveren": driver.employer or "",
-        "aylik_gelir": str(driver.monthly_income) if driver.monthly_income is not None else None,
+        "identity_verified": bool(identity and identity.identity_verified),
+        "phone_verified": bool(identity and identity.phone_verified),
+        "document_fraud_suspicion": bool(identity and identity.document_fraud_suspicion),
+        "license_issue_date": license_p.license_issue_date.isoformat() if license_p and license_p.license_issue_date else None,
+        "license_points": license_p.license_points if license_p else 0,
+        "license_penalty_count": license_p.license_penalty_count if license_p else 0,
+        "findeks_score": financial.findeks_score if financial else None,
+        "enforcement_record": bool(financial and financial.has_enforcement_record),
+        "bank_blacklist": bool(financial and financial.bank_blacklist_flag),
+        "payment_delay_count": financial.payment_delay_count if financial else 0,
+        "occupation": driver.occupation or "",
+        "employer": driver.employer or "",
+        "monthly_income": str(driver.monthly_income) if driver.monthly_income is not None else None,
     }
 
 
 def _driver_list_item(driver: Driver, *, vehicle=None) -> dict:
     data = DriverSerializer(driver).data
     level = driver.risk_level or None
-    data["risk_skoru"] = driver.current_risk_score
-    data["risk_seviye"] = level
-    data["risk_seviye_label"] = RISK_LEVEL_LABELS.get(level or "", "—") if level else "—"
-    data["risk_onaylandi"] = driver_has_risk_approval(driver)
-    data["aktif_kiralama"] = _active_rental_payload(driver)
+    data["risk_score"] = driver.current_risk_score
+    data["risk_level"] = level
+    data["risk_level_label"] = RISK_LEVEL_LABELS.get(level or "", "—") if level else "—"
+    data["risk_approved"] = driver_has_risk_approval(driver)
+    data["active_rental"] = _active_rental_payload(driver)
     if vehicle is not None:
-        data["araca_uygun"] = is_driver_eligible_for_vehicle(driver, vehicle)
+        data["vehicle_eligible"] = is_driver_eligible_for_vehicle(driver, vehicle)
     return data
 
 
@@ -100,7 +110,7 @@ def _driver_detail_item(driver: Driver) -> dict:
     data = _driver_list_item(driver)
     evaluation = build_driver_risk_payload(driver)
     data["risk"] = evaluation
-    data["profil_ozeti"] = _profile_summary(driver)
+    data["profile_summary"] = _profile_summary(driver)
     return data
 
 
@@ -136,6 +146,11 @@ class DriverListView(ListAPIView):
                     queryset=CustomerRiskSnapshot.objects.order_by("-computed_at"),
                 ),
             )
+            # DriverSerializer.get_total_rentals() eskiden HER sürücü için
+            # ayrı bir COUNT sorgusu çalıştırıyordu (N+1 — 500 sürücülük bir
+            # filoda 500 ekstra sorgu). Tek bir JOIN+GROUP BY ile önceden
+            # hesaplanır; serializer artık bunu okur, sorgu atmaz.
+            .annotate(total_rentals_count=Count("rentals", filter=~Q(rentals__status=RentalStatus.CANCELLED)))
             .order_by("last_name", "first_name")
         )
 
@@ -150,11 +165,30 @@ class DriverListView(ListAPIView):
         if vehicle is not None:
             drivers = [driver for driver in drivers if is_driver_eligible_for_vehicle(driver, vehicle)]
 
+        total_count = len(drivers)
+
+        # Sayfalama İSTEĞE BAĞLIDIR (geriye dönük uyumluluk için) — `?page=`
+        # gönderilmezse davranış birebir eskisi gibi TAM listedir (mevcut
+        # frontend bu parametreyi hiç göndermez, bu yüzden mevcut davranış
+        # değişmez). Gönderilirse, en pahalı kısım (`_driver_list_item` —
+        # her sürücü için risk/uygunluk hesabı) yalnızca o sayfanın
+        # sürücüleri için çalışır; büyük filolarda tam listeyi serileştirme
+        # CPU/yanıt-boyutu maliyetini önler (bkz. performans denetimi).
+        page_param = request.query_params.get("page")
+        if page_param is not None:
+            try:
+                page_size = max(1, min(200, int(request.query_params.get("page_size", 25))))
+                page_number = max(1, int(page_param))
+            except ValueError:
+                page_number, page_size = 1, 25
+            start = (page_number - 1) * page_size
+            drivers = drivers[start : start + page_size]
+
         items = [_driver_list_item(driver, vehicle=vehicle) for driver in drivers]
         return Response(
             {
-                "surucu_sayisi": len(items),
-                "surucular": items,
+                "driver_count": total_count,
+                "drivers": items,
                 "vehicle_id": vehicle.pk if vehicle else None,
             }
         )
@@ -177,16 +211,31 @@ class DriverCreateView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # `Driver.objects.create(...)` tetiklediği `post_save` sinyali
+        # (apps/customer_profiles/signals.py) risk değerlendirmesini
+        # `transaction.on_commit` ile erteler. Bu blok bilerek TEK bir
+        # `transaction.atomic()` içine alınıyor — aksi halde sinyalin
+        # ertelenmiş çağrısı, aşağıdaki `_apply_driver_profiles` ve
+        # `evaluate()` çağrılarından ÖNCE (bu view'da başka bir atomic blok
+        # olmadığı için) tetiklenir ve sürücü henüz boş/varsayılan profille
+        # değerlendirilir; ardından buradaki gerçek `evaluate()` ikinci kez
+        # (gereksiz bir kural motoru geçişi + fazladan bir
+        # CustomerRiskSnapshot ile) çalışır. Tek atomic blok içinde sinyalin
+        # `on_commit` çağrısı bu view'ın KENDİ `evaluate()` çağrısından SONRA
+        # tetiklenir; sinyaldeki `current_risk_score is not None` koruması
+        # da bu noktada zaten dolu olduğu için ikinci değerlendirmeyi
+        # atlar — sinyal başka bir oluşturma yolunda (ör. doğrudan ORM/admin)
+        # hâlâ tek başına çalışmaya devam eder, kaldırılmıyor.
         try:
-            driver = Driver.objects.create(company_id=company_id, **data["driver"])
+            with transaction.atomic():
+                driver = Driver.objects.create(company_id=company_id, **data["driver"])
+                _apply_driver_profiles(driver, data)
+                evaluation = DriverEvaluationService().evaluate(driver)
         except IntegrityError:
             return Response(
                 {"error": "Bu TC kimlik numarası bu şirkette zaten kayıtlı."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-
-        _apply_driver_profiles(driver, data)
-        evaluation = DriverEvaluationService().evaluate(driver)
         driver.refresh_from_db()
 
         payload = _driver_detail_item(driver)
@@ -221,14 +270,14 @@ class DriverScoreView(APIView):
         return Response(
             {
                 "driver_id": result.driver_id,
-                "ad_soyad": driver.full_name,
+                "full_name": driver.full_name,
                 "driver_score": result.score,
                 "summary": {
-                    "toplam_hiz_ihlali": result.total_violations,
-                    "toplam_ani_fren": result.total_brakes,
-                    "toplam_ani_hizlanma": result.total_accelerations,
-                    "kiralama_sayisi": result.rental_count,
-                    "surus_yorumu": driver_comment(result.score),
+                    "total_speed_violations": result.total_violations,
+                    "total_hard_brakes": result.total_brakes,
+                    "total_hard_accelerations": result.total_accelerations,
+                    "rental_count": result.rental_count,
+                    "driving_comment": driver_comment(result.score),
                 },
             }
         )
@@ -250,22 +299,22 @@ class DriverRentalHistoryView(APIView):
         return Response(
             {
                 "driver_id": driver.pk,
-                "ad_soyad": driver.full_name,
-                "kiralamalar": [
+                "full_name": driver.full_name,
+                "rentals": [
                     {
                         "id": rental.pk,
-                        "plaka": rental.vehicle.plate_number,
-                        "marka_model": format_marka_model_sinif(
+                        "plate_number": rental.vehicle.plate_number,
+                        "brand_model": format_brand_model_segment(
                             rental.vehicle.brand,
                             rental.vehicle.model,
                             rental.vehicle.sipp_code,
                         ),
-                        "durum": rental.get_status_display(),
-                        "durum_kodu": rental.status,
-                        "baslangic": rental.started_at.isoformat(),
-                        "bitis": rental.ended_at.isoformat() if rental.ended_at else None,
-                        "baslangic_km": rental.start_km,
-                        "bitis_km": rental.end_km,
+                        "status_label": rental.get_status_display(),
+                        "status_code": rental.status,
+                        "started_at": rental.started_at.isoformat(),
+                        "ended_at": rental.ended_at.isoformat() if rental.ended_at else None,
+                        "start_km": rental.start_km,
+                        "end_km": rental.end_km,
                     }
                     for rental in rentals
                 ],

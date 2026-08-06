@@ -7,7 +7,7 @@ from datetime import date
 from rest_framework import serializers
 
 from backend.apps.customer_profiles.models import Driver
-from backend.apps.reservations.models import RentalStatus
+from backend.apps.rentals.models import RentalStatus
 from backend.apps.risk_checks.serializers import (
     CustomerFinancialSerializer,
     CustomerIdentitySerializer,
@@ -26,21 +26,21 @@ class DriverCreateRequestSerializer(serializers.Serializer):
 class DriverSerializer(serializers.ModelSerializer):
     """Sürücü listesi / detay — risk ve araç uygunluğu view katmanında eklenir."""
 
-    ad_soyad = serializers.CharField(source="full_name", read_only=True)
-    yas = serializers.SerializerMethodField()
-    cinsiyet = serializers.CharField(source="get_gender_display", read_only=True)
-    toplam_kiralama = serializers.SerializerMethodField()
+    full_name = serializers.CharField(read_only=True)
+    age = serializers.SerializerMethodField()
+    gender_display = serializers.CharField(source="get_gender_display", read_only=True)
+    total_rentals = serializers.SerializerMethodField()
 
     class Meta:
         model = Driver
         fields = (
             "id",
-            "ad_soyad",
+            "full_name",
             "first_name",
             "last_name",
             "national_id",
-            "yas",
-            "cinsiyet",
+            "age",
+            "gender_display",
             "gender",
             "birth_date",
             "phone",
@@ -54,7 +54,7 @@ class DriverSerializer(serializers.ModelSerializer):
             "employer",
             "monthly_income",
             "is_blacklisted",
-            "toplam_kiralama",
+            "total_rentals",
             "current_risk_score",
             "risk_level",
             "risk_note",
@@ -62,10 +62,16 @@ class DriverSerializer(serializers.ModelSerializer):
         )
         read_only_fields = fields
 
-    def get_yas(self, obj: Driver) -> int:
+    def get_age(self, obj: Driver) -> int:
         today = date.today()
         born = obj.birth_date
         return today.year - born.year - ((today.month, today.day) < (born.month, born.day))
 
-    def get_toplam_kiralama(self, obj: Driver) -> int:
+    def get_total_rentals(self, obj: Driver) -> int:
+        # DriverListView.get_queryset() bunu `total_rentals_count` olarak
+        # tek bir sorguda (JOIN+GROUP BY, N+1 önlenir) önceden hesaplar;
+        # anotasyon yoksa (ör. tekil sürücü detayı) doğrudan sorgulanır.
+        annotated = getattr(obj, "total_rentals_count", None)
+        if annotated is not None:
+            return annotated
         return obj.rentals.exclude(status=RentalStatus.CANCELLED).count()

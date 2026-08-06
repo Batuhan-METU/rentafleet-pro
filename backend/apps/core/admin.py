@@ -7,7 +7,12 @@ from django.contrib.auth.admin import UserAdmin
 from django.db.models import QuerySet
 from django.http import HttpRequest
 
+from backend.apps.companies.models import (
+    Company,
+    CustomUser,
+)
 from backend.apps.customer_profiles.models import Driver
+from backend.apps.rentals.models import Rental
 from backend.apps.risk_checks.models import (
     CustomerFinancialProfile,
     CustomerIdentityProfile,
@@ -18,11 +23,6 @@ from backend.apps.risk_checks.models import (
     RuleSet,
     VehicleRiskTier,
 )
-from backend.apps.reservations.models import Rental
-from backend.apps.companies.models import (
-    Company,
-    CustomUser,
-)
 from backend.apps.vehicles.models import Vehicle
 from backend.common.admin.company import CompanyScopedModelAdmin, filter_queryset_for_company
 
@@ -31,7 +31,10 @@ from backend.common.admin.company import CompanyScopedModelAdmin, filter_queryse
 class CustomUserAdmin(UserAdmin):
     list_display = ("username", "email", "role", "company", "is_staff")
     list_filter = ("role", "company", "is_staff", "is_superuser")
-    fieldsets = UserAdmin.fieldsets + (
+    # `UserAdmin.fieldsets` django-stubs'ta Optional (bir alt sınıf teorik
+    # olarak unset bırakabilir) ama Django'nun kendi UserAdmin'i bunu HER
+    # ZAMAN tanımlar — `or ()` teorik None durumunu da güvenli kılar.
+    fieldsets = tuple(UserAdmin.fieldsets or ()) + (
         ("Fleet platform", {"fields": ("role", "company")}),
     )
 

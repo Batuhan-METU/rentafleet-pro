@@ -6,9 +6,10 @@ import { useUiStore } from '../../stores/uiStore.js'
 import { useVehicleStore } from '../../stores/vehicleStore.js'
 import { formatNumber, formatTL } from '../../utils/format.js'
 import { VEHICLE_STATUS_LABELS } from '../../utils/vehicleStatus.js'
+import { ICON_PATHS } from '../../utils/iconPaths.js'
 import FleetDonutChart from './FleetDonutChart.vue'
 import RevenueLineChart from './RevenueLineChart.vue'
-import NavigationLoadingOverlay from './NavigationLoadingOverlay.vue'
+import NavigationLoadingOverlay from '../NavigationLoadingOverlay.vue'
 
 const props = defineProps({
   navigate: { type: Function, required: true },
@@ -59,20 +60,16 @@ const fleetCards = computed(() => [
 // İkon path'leri statMeta ile aynı anahtarları (stat.anahtar) kullanır; salt
 // sunum amaçlı, backend'den gelen veriyi veya hesaplama mantığını etkilemez.
 const STAT_ICON_PATHS = {
-  net_kazanc:
-    'M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z',
-  yillik_gelir:
-    'M2.25 18L9 11.25l4.306 4.306a11.95 11.95 0 015.814-5.518l2.74-1.22m0 0l-5.94-2.28m5.94 2.28l-2.28 5.941',
-  net_kar:
-    'M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.75h-.152c-3.196 0-6.1-1.248-8.25-3.286z',
-  kiralama_sayisi:
-    'M9 17a2 2 0 11-4 0 2 2 0 014 0zM19 17a2 2 0 11-4 0 2 2 0 014 0z M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h1m8-1a1 1 0 01-1 1H9m4-1V8a1 1 0 011-1h2.586a1 1 0 01.707.293l3.414 3.414a1 1 0 01.293.707V16a1 1 0 01-1 1h-1',
-  kiralanan_gun:
-    'M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5',
+  yillik_gider:
+    'M2.25 6L9 12.75l4.306-4.306a11.95 11.95 0 015.814 5.518l2.74 1.22m0 0l-5.94 2.28m5.94-2.28l-2.28-5.941',
+  yillik_gelir: ICON_PATHS.trendingUp,
+  net_kar: ICON_PATHS.shieldCheck,
+  kiralama_sayisi: ICON_PATHS.truck,
+  kiralanan_gun: ICON_PATHS.calendar,
 }
 
 const statMeta = {
-  net_kazanc: { accent: '#7c3aed', tint: 'rgba(124, 58, 237, 0.1)' },
+  yillik_gider: { accent: '#ea580c', tint: 'rgba(234, 88, 12, 0.1)' },
   yillik_gelir: { accent: '#0891b2', tint: 'rgba(8, 145, 178, 0.1)' },
   net_kar: { accent: '#059669', tint: 'rgba(5, 150, 105, 0.1)' },
   kiralama_sayisi: { accent: '#d97706', tint: 'rgba(217, 119, 6, 0.1)' },
@@ -138,11 +135,11 @@ function selectYear(year) {
 }
 
 // "Aylık Gelir Trendi" başlığının yanındaki dinamik dönem etiketi — gerçek
-// takvim ayı/yılını gösterir (seçili istatistik yılından bağımsız).
+// takvim ayını gösterir (seçili istatistik yılından bağımsız).
 const currentPeriodLabel = computed(() => {
   const now = new Date()
   const month = new Intl.DateTimeFormat('tr-TR', { month: 'long' }).format(now)
-  return `${month.charAt(0).toLocaleUpperCase('tr')}${month.slice(1)} ${now.getFullYear()}`
+  return `${month.charAt(0).toLocaleUpperCase('tr')}${month.slice(1)}`
 })
 </script>
 
@@ -328,10 +325,7 @@ const currentPeriodLabel = computed(() => {
           <!-- Aylık gelir grafiği -->
           <div class="mt-8 rounded-2xl bg-white/70 p-5 ring-1 ring-slate-100 backdrop-blur-sm">
             <div class="mb-4 flex items-center justify-between">
-              <div>
-                <h4 class="font-display font-bold text-slate-900">Aylık Gelir Trendi</h4>
-                <p class="text-xs text-slate-500">{{ selectedYear }} yılı kırılımı</p>
-              </div>
+              <h4 class="font-display font-bold text-slate-900">Aylık Gelir Trendi</h4>
               <span class="rounded-full bg-slate-50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-slate-400 ring-1 ring-slate-100">
                 {{ currentPeriodLabel }}
               </span>

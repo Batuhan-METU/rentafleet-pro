@@ -13,7 +13,7 @@ export const useDriverStore = defineStore('driver', {
 
   getters: {
     driverCount: (state) => state.drivers.length,
-    riskyDrivers: (state) => state.drivers.filter((d) => d.risk_skoru != null && d.risk_skoru >= 61),
+    riskyDrivers: (state) => state.drivers.filter((d) => d.risk_score != null && d.risk_score >= 61),
   },
 
   actions: {
@@ -23,7 +23,7 @@ export const useDriverStore = defineStore('driver', {
       try {
         const params = vehicleId ? { vehicle_id: vehicleId } : undefined
         const { data } = await apiClient.get('drivers/', { params })
-        this.drivers = data.surucular ?? []
+        this.drivers = data.drivers ?? []
       } catch {
         this.error = true
       } finally {
@@ -36,9 +36,9 @@ export const useDriverStore = defineStore('driver', {
       const existing = this.drivers.findIndex((d) => d.id === data.id)
       const listItem = {
         ...data,
-        risk_skoru: data.risk?.skor ?? data.current_risk_score,
-        risk_seviye: data.risk?.seviye,
-        risk_seviye_label: data.risk?.seviye_label ?? '—',
+        risk_score: data.risk?.skor ?? data.current_risk_score,
+        risk_level: data.risk?.seviye,
+        risk_level_label: data.risk?.seviye_label ?? '—',
       }
       if (existing >= 0) {
         this.drivers.splice(existing, 1, listItem)
@@ -54,7 +54,7 @@ export const useDriverStore = defineStore('driver', {
         const { data } = await apiClient.get(`drivers/${id}/`)
         this.selectedDriver = data
         const rentals = await apiClient.get(`drivers/${id}/rentals/`)
-        this.rentalHistory = rentals.data.kiralamalar ?? []
+        this.rentalHistory = rentals.data.rentals ?? []
       } catch {
         this.selectedDriver = null
         this.rentalHistory = []

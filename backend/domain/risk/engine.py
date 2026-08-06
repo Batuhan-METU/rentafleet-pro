@@ -9,21 +9,29 @@ from backend.domain.rule_engine.thresholds import (
     RISK_SCORE_MIN,
     score_to_risk_level,
 )
-from backend.domain.risk.rule_loader import build_risk_engine
 from backend.domain.shared.enums import RiskLevel
 from backend.domain.shared.types import CustomerSnapshot, EngineResult
 
 
 class RiskEngine:
-    def __init__(
-        self,
-        rule_engine: RuleEngine | None = None,
-        *,
-        company_id: int,
-    ) -> None:
-        self._engine = rule_engine or build_risk_engine(company_id)
+    """Saf risk skoru motoru — hangi kural setinin kullanılacağı çağıranın
+    sorumluluğudur (bkz. ``backend.application.risk.rule_loader.build_risk_engine``
+    için DB'den kural yükleyen orkestrasyon). Domain katmanı ORM'e dokunmaz.
+    """
+
+    def __init__(self, rule_engine: RuleEngine) -> None:
+        self._engine = rule_engine
 
     def evaluate(self, customer: CustomerSnapshot) -> EngineResult:
+        """Kural motorunu çalıştırıp puanı [0, 100] aralığına sıkıştırır ve seviyeye çevirir.
+
+        ``level == VERY_HIGH`` ile ``clamped >= RISK_BLOCK_THRESHOLD`` şu an
+        aynı bandı (81-100) test ediyor gibi görünse de KASITLI olarak ayrı
+        tutulur: seviye bantları (``RISK_LEVEL_BANDS``) ile blok eşiği
+        (``RISK_BLOCK_THRESHOLD``) ayrı ayrı ayarlanabilir sabitlerdir —
+        biri diğerinden bağımsız değiştirilirse (ör. blok eşiği 85'e
+        çekilirse) bu ikili kontrol hâlâ doğru davranır.
+        """
         base = self._engine.evaluate(customer)
         raw_score = base.score or 0
         clamped = max(RISK_SCORE_MIN, min(RISK_SCORE_MAX, raw_score))

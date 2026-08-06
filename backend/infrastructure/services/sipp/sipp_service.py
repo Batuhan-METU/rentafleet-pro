@@ -7,6 +7,7 @@ temsilcisiyle etiketlenir (ör. Hyundai i20 → "Renault Clio benzeri araç").
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 # --- SIPP pozisyon sözlükleri (Türkçe) ---------------------------------
@@ -140,6 +141,26 @@ _MODEL_PROFILES: dict[tuple[str, str], SippProfile] = {
 _DEFAULT_PROFILE = SippProfile("CDMR", "Volkswagen Golf benzeri araç")
 
 
+# Enuygun ilan başlıkları "Renault Clio ve benzeri" gibi ekler taşır; bu
+# ek temizlenmeden _MODEL_PROFILES'taki temiz ("renault","clio") anahtarı
+# HİÇBİR ZAMAN eşleşmez (aynı ek, vehicle_matching_service.py'de de ayrıca
+# temizlenir — modüller birbirine bağımlı olmasın diye burada küçük bir
+# tekrar tercih edildi).
+_LISTING_SUFFIX_RE = re.compile(
+    r"\s*(?:\(.*?\)|ve\s+benzeri|veya\s+benzeri|benzeri|vb\.?|or\s+similar)\s*$",
+    re.IGNORECASE,
+)
+
+
+def _strip_listing_suffix(model: str) -> str:
+    text = (model or "").strip()
+    while True:
+        stripped = _LISTING_SUFFIX_RE.sub("", text).strip()
+        if stripped == text:
+            return text
+        text = stripped
+
+
 def _normalize_key(brand: str, model: str) -> tuple[str, str]:
     return brand.strip().lower(), model.strip().lower()
 
@@ -154,7 +175,13 @@ def resolve_sipp(brand: str, model: str, sipp_code: str | None = None) -> SippPr
 
 
 def decode_sipp(code: str) -> dict[str, str]:
-    """4 harfli SIPP kodunu Türkçe bileşenlere ayırır."""
+    """4 harfli SIPP kodunu Türkçe bileşenlere ayırır.
+
+    Not (isimlendirme): dönüş dict'inin key'leri (``sinif``/``kasa``/
+    ``vites``/``yakit_klima``) BİLİNÇLİ OLARAK Türkçe bırakılmıştır —
+    ``apps/vehicles/serializers.py``'de ``sipp_ozellikler`` alanının
+    değeri olarak DOĞRUDAN API yanıtına gidiyor (Faz 3 kapsamı).
+    """
     c = (code or "????").upper().ljust(4, "?")[:4]
     return {
         "sinif": _CATEGORY_TR.get(c[0], c[0]),
@@ -168,13 +195,13 @@ def segment_label_for(brand: str, model: str, sipp_code: str = "") -> str:
     return resolve_sipp(brand, model, sipp_code or None).segment_label
 
 
-def format_marka_model_sinif(brand: str, model: str, sipp_code: str = "") -> str:
+def format_brand_model_segment(brand: str, model: str, sipp_code: str = "") -> str:
     """Örn. 'Hyundai i20 (Renault Clio benzeri araç)'."""
     label = segment_label_for(brand, model, sipp_code)
     return f"{brand} {model} ({label})"
 
 
-def sipp_detay_metni(code: str) -> str:
+def sipp_detail_text(code: str) -> str:
     """SIPP kodunun insan okunur Türkçe özeti."""
     parts = decode_sipp(code)
     return (
@@ -207,8 +234,18 @@ def _normalize_text(text: str) -> str:
     return (text or "").strip().lower()
 
 
+# Marka tek başına sınıfı (SIPP[0]) belirlemeye yeter — hem filo aracı hem
+# Enuygun ilanı için: `class`/`vehicle_class` ipucu boş/tanınmayan geldiğinde
+# (özellikle premium markalarda sık) jenerik "C" (Kompakt) varsayılanına
+# düşüp örn. bir BMW 520i'yi ekonomi sınıfı bir araçla aynı sepete
+# koymasın diye.
+_PREMIUM_BRANDS_FOR_SIPP = frozenset(
+    {"mercedes", "bmw", "audi", "tesla", "volvo", "lexus", "porsche"}
+)
+
+
 def _infer_category_body(brand: str, model: str, vehicle_class: str) -> tuple[str, str]:
-    """Bilinmeyen model için Enuygun sınıfı ve isim ipuçlarından SIPP[0:2] üretir."""
+    """Bilinmeyen model için marka + Enuygun sınıfı + isim ipuçlarından SIPP[0:2] üretir."""
     name = _normalize_text(model)
     cls = _normalize_text(vehicle_class)
 
@@ -216,6 +253,9 @@ def _infer_category_body(brand: str, model: str, vehicle_class: str) -> tuple[st
         if any(hint in name for hint in _COMPACT_SUV_HINTS):
             return "C", "F"
         return "I", "F"
+
+    if _normalize_text(brand) in _PREMIUM_BRANDS_FOR_SIPP:
+        return "P", "D"
 
     return _ENUYGUN_CLASS_CATEGORY_BODY.get(cls, ("C", "D"))
 
@@ -249,17 +289,16 @@ def derive_sipp_from_listing(
     vehicle_class: str = "",
     fuel: str = "",
     transmission: str = "",
-    api_sipp_code: str | None = None,
 ) -> str:
     """Enuygun teklifinden 4 harfli SIPP kodu türetir.
 
-    Önce marka/model haritası, yoksa Enuygun sınıfı + gövde ipuçları kullanılır.
-    Şanzıman ve yakıt API'deki Türkçe etiketlerden SIPP[2] ve SIPP[3]'e yazılır.
+    Enuygun'un kendi gönderdiği ``sippCode`` KASITLI OLARAK kullanılmaz —
+    tedarikçilerin girdiği bu kod güvenilmez (bkz. vehicle_matching_service.py
+    docstring'i). Kod her zaman gerçek özniteliklerden türetilir: önce
+    marka/model haritası, yoksa Enuygun sınıfı + gövde ipuçları; şanzıman
+    ve yakıt API'deki Türkçe etiketlerden SIPP[2] ve SIPP[3]'e yazılır.
     """
-    if api_sipp_code and len(api_sipp_code.strip()) == 4:
-        return api_sipp_code.strip().upper()
-
-    key = _normalize_key(brand, model)
+    key = _normalize_key(brand, _strip_listing_suffix(model))
     if key in _MODEL_PROFILES:
         category, body = _MODEL_PROFILES[key].code[0], _MODEL_PROFILES[key].code[1]
     else:
@@ -289,5 +328,33 @@ def derive_sipp_from_reservation_vehicle(vehicle: dict) -> str:
         vehicle_class=vehicle.get("class") or "",
         fuel=vehicle.get("fuel") or "",
         transmission=vehicle.get("transmission") or "",
-        api_sipp_code=vehicle.get("sippCode"),
     )
+
+
+# --- Filo aracı → SIPP türetme -----------------------------------------
+# vehicle.sipp_code (Ziraat Excel'inden) KASITLI OLARAK kullanılmaz —
+# filo yöneticileri bu kodu fiyatlandırma amacıyla serbestçe giriyor,
+# aracın gerçek fiziksel sınıfını yansıtmıyor. Uluslararası kod, tıpkı
+# Enuygun ilanlarında olduğu gibi, gerçek marka/model + vites + yakıttan
+# türetilir. `resolve_sipp()` DEĞİŞMEDİ — aracın "kendi" (Ziraat) SIPP
+# kodunu göstermeye devam eden tüm ekranlar (Araçlar sayfası, dışa
+# aktarım, uygun-araçlar listesi) onu kullanmaya devam eder.
+
+
+def derive_international_sipp_for_vehicle(vehicle) -> str:
+    """Filo aracı için uluslararası SIPP kodu — eşleştirmede kullanılır.
+
+    ``vehicle.sipp_code``'a hiç bakmaz. Sınıf/kasa marka+model tablosundan
+    (veya premium marka/isim ipuçlarından, bkz. ``_infer_category_body``);
+    vites+yakıt aracın kendi ``transmission``/``fuel_type`` alanlarından
+    türetilir.
+    """
+    key = _normalize_key(vehicle.brand, vehicle.model)
+    if key in _MODEL_PROFILES:
+        category, body = _MODEL_PROFILES[key].code[0], _MODEL_PROFILES[key].code[1]
+    else:
+        category, body = _infer_category_body(vehicle.brand, vehicle.model, "")
+
+    trans = _transmission_char(vehicle.get_transmission_display())
+    fuel_code = _fuel_char(vehicle.get_fuel_type_display())
+    return f"{category}{body}{trans}{fuel_code}"

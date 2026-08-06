@@ -2,19 +2,23 @@
 
 from __future__ import annotations
 
+import dataclasses
 from decimal import Decimal
+from typing import Any
 
 from backend.domain.shared.types import CustomerSnapshot
 
 
-def make_snapshot(**overrides) -> CustomerSnapshot:
+def make_snapshot(**overrides: Any) -> CustomerSnapshot:
     """Temiz-geçmişli, düşük riskli varsayılan bir müşteri anlık görüntüsü.
 
     Testler yalnızca ilgili alanları ``overrides`` ile geçersiz kılar; böylece
     her testte ``CustomerSnapshot``'ın tüm alanlarını tekrar yazmak zorunda
-    kalınmaz.
+    kalınmaz. ``dataclasses.replace`` kullanılır — ``CustomerSnapshot``
+    frozen bir dataclass olduğu için hem doğru tip denetimi sağlar hem de
+    "önce oluştur, sonra geçersiz kıl" desenini tek satırda ifade eder.
     """
-    defaults = dict(
+    base = CustomerSnapshot(
         customer_id=1,
         company_id=1,
         national_id="11111111110",
@@ -44,5 +48,4 @@ def make_snapshot(**overrides) -> CustomerSnapshot:
         traffic_fine_count=0,
         is_first_rental=False,
     )
-    defaults.update(overrides)
-    return CustomerSnapshot(**defaults)
+    return dataclasses.replace(base, **overrides)

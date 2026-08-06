@@ -8,8 +8,9 @@ Kurallar:
 from __future__ import annotations
 
 import re
-from typing import Callable
+from collections.abc import Callable
 
+from django.conf import settings
 from django.http import HttpRequest, HttpResponse, JsonResponse
 
 from backend.apps.companies.models import Company
@@ -37,30 +38,62 @@ def extract_subdomain(host: str) -> str | None:
     return None
 
 
-def company_matches_subdomain(company: Company, subdomain: str) -> bool:
-    needle = subdomain.lower().strip()
-    if not needle:
-        return False
+def _exact_subdomain_match(company: Company, needle: str) -> bool:
+    """Vergi no, tam ad veya sluglaştırılmış ad birebir eşleşiyor mu?"""
     if company.tax_number.lower() == needle:
         return True
-    name = company.name.lower().strip()
-    if name == needle:
+    if company.name.lower().strip() == needle:
         return True
-    name_slug, needle_slug = _slugify(company.name), _slugify(needle)
-    return name_slug == needle_slug or name_slug.startswith(needle_slug)
+    return _slugify(company.name) == _slugify(needle)
+
+
+def _prefix_subdomain_match(company: Company, needle: str) -> bool:
+    """Geriye dönük uyumluluk: sluglaştırılmış ad, subdomain'in öneki mi?"""
+    return _slugify(company.name).startswith(_slugify(needle))
 
 
 def resolve_company_by_subdomain(subdomain: str) -> Company | None:
+    """Alt alan adını şirkete çözer — önce TAM eşleşme, sonra önek eşleşmesi.
+
+    İki geçişli olmasının nedeni: iki şirketten birinin sluğu diğerinin öneki
+    olduğunda (ör. "acme" / "acmecorp") eski tek-geçişli `startswith` taraması
+    `id` sırasına göre YANLIŞ şirketi seçebiliyordu — bu, "acme" subdomain'ine
+    gelen bir kullanıcının "acmecorp" şirketine çözülüp giriş yapamamasına
+    (veya başka bir şirketin marka bilgisini görmesine) yol açan gerçek bir
+    hataydı. Tam eşleşme her zaman önceliklidir; önek eşleşmesi yalnızca hiç
+    tam eşleşme yoksa devreye girer.
+    """
     if not subdomain:
         return None
-    for company in Company.objects.all().order_by("id"):
-        if company_matches_subdomain(company, subdomain):
+    needle = subdomain.lower().strip()
+    if not needle:
+        return None
+    # Eşleştirme yalnızca tax_number/name'e baktığı için diğer sütunlar hiç
+    # çekilmez — satır sayısı yine O(şirket sayısı) ama her satırın maliyeti
+    # düşer. Gerçek O(1) çözüm (indekslenmiş bir `subdomain_slug` sütunu)
+    # şema değişikliği + geriye dönük doldurma gerektirir; bu projenin
+    # ölçeğinde (bkz. audit bulgusu #35) şimdilik gerekli değil.
+    companies = list(Company.objects.only("id", "tax_number", "name").order_by("id"))
+    for company in companies:
+        if _exact_subdomain_match(company, needle):
+            return company
+    for company in companies:
+        if _prefix_subdomain_match(company, needle):
             return company
     return None
 
 
 def _dev_company_slug(request: HttpRequest) -> str | None:
-    """Düz localhost'ta ?company= veya X-Company-Slug (host subdomain değil)."""
+    """Sadece DEBUG=True iken: düz localhost'ta ?company= veya X-Company-Slug.
+
+    Üretimde (DEBUG=False) bu geçersizdir — aksi halde herhangi bir ziyaretçi
+    ana alan adında (ör. rentafleetpro.com) bu parametre/header ile
+    `request.company`'yi keyfi bir şirkete zorlayabilirdi (satır bazlı veri
+    erişimini etkilemez — o her zaman `user.company`'ye bakar — ama sahte
+    403'lere veya marka bilgisi sızıntısına yol açabilirdi).
+    """
+    if not settings.DEBUG:
+        return None
     header = request.headers.get("X-Company-Slug", "").strip().lower()
     if header and header not in _RESERVED:
         return header

@@ -1,21 +1,17 @@
 """Proje çekirdeği — iş mantığı DEĞİL, altyapı kabuğu.
 
 ``core`` modülünün görevleri:
-  * **Migration geçmişi** — Django app label ``api`` (mevcut DB tabloları: ``api_*``)
-  * **Kök URL yönlendirme** — ``api.py`` altında ``/admin`` ve ``/api/...``
+  * **Kök URL yönlendirme** — ``urls.py`` altında (ROOT_URLCONF) ``/admin`` ve ``/api/...``
   * **Sağlık kontrolü** — ``GET /api/health/``
 
 Domain modelleri, view'lar ve serializer'lar kendi app'lerinde yaşar
-(``companies``, ``vehicles``, ``customer_profiles``, …). ``core`` bunları toplamaz.
+(``companies``, ``vehicles``, ``customer_profiles``, …). ``core`` bunları toplamaz
+ve kendi migration geçmişi yoktur (``models.py`` içermez).
 
-ÖNEMLİ — ``app_label`` kuralı: Proje, düz bir ``api`` app'inden bugünkü
-katmanlı yapıya (``backend/apps/<domain>/``) refactor edildi ancak migration
-geçmişi ve DB tablo adları (``api_*``) geriye dönük uyumluluk için ``api``
-etiketinde bırakıldı (bkz. ``backend.settings.MIGRATION_MODULES``). Bu yüzden
-``backend/apps/<domain>/models*.py`` altındaki HER model ``class Meta:
-app_label = "api"`` bildirmelidir — aksi halde Django modeli kendi app
-config'inin etiketine (örn. ``vehicles``) bağlamaya çalışır ve migration
-geçmişiyle uyuşmayan yeni bir app/tablo seti oluşturmaya kalkışır.
+Not — DB tablo adları hâlâ tarihsel ``api_*`` önekini taşır (her modelin
+``Meta.db_table``'ında sabitlenmiştir), ancak Django ``app_label`` artık her
+model kendi app'ine (``companies``, ``vehicles``, ``risk_checks``, …) aittir;
+eski paylaşımlı ``api`` etiketi ve ``backend/migrations/`` klasörü kaldırıldı.
 """
 
 from django.apps import AppConfig
@@ -24,5 +20,5 @@ from django.apps import AppConfig
 class CoreConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
     name = "backend.apps.core"
-    label = "api"
+    label = "core"
     verbose_name = "Proje çekirdeği"

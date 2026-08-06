@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { formatTL } from '../../utils/format.js'
 
 const props = defineProps({
@@ -7,8 +7,33 @@ const props = defineProps({
   height: { type: Number, default: 160 },
 })
 
-const PAD_TOP = 12
-const PAD_BOTTOM = 8
+const PAD_TOP = 16
+const PAD_BOTTOM = 10
+
+// Grafiği gerçek piksel genişliğinde ölçüp viewBox'ı buna eşitliyoruz —
+// eskiden 0-100'lük bir viewBox'ı preserveAspectRatio="none" ile geniş bir
+// kutuya oranti bozarak geriyordu; bu da eğrinin/noktaların X ve Y'de farklı
+// ölçeklenmesine (oval noktalar, kopuk görünen segmentler) yol açıyordu.
+// Piksel-birebir viewBox kullanınca ölçek her eksende 1:1 olur, bozulma kalmaz.
+const containerEl = ref(null)
+const containerWidth = ref(0)
+let resizeObserver = null
+
+onMounted(() => {
+  if (containerEl.value) {
+    containerWidth.value = containerEl.value.clientWidth
+    resizeObserver = new ResizeObserver((entries) => {
+      containerWidth.value = entries[0].contentRect.width
+    })
+    resizeObserver.observe(containerEl.value)
+  }
+})
+
+onBeforeUnmount(() => {
+  resizeObserver?.disconnect()
+})
+
+const width = computed(() => containerWidth.value || 600)
 
 const maxValue = computed(() =>
   Math.max(...props.data.map((d) => d.gelir ?? 0), 1),
@@ -16,13 +41,13 @@ const maxValue = computed(() =>
 
 const points = computed(() => {
   const n = props.data.length
-  const step = n > 1 ? 100 / (n - 1) : 0
+  const step = n > 1 ? width.value / (n - 1) : 0
   return props.data.map((d, i) => {
     const value = d.gelir ?? 0
     const ratio = maxValue.value ? value / maxValue.value : 0
     return {
-      x: n > 1 ? i * step : 50,
-      y: 100 - PAD_BOTTOM - ratio * (100 - PAD_TOP - PAD_BOTTOM),
+      x: n > 1 ? i * step : width.value / 2,
+      y: props.height - PAD_BOTTOM - ratio * (props.height - PAD_TOP - PAD_BOTTOM),
       value,
       label: d.ay,
     }
@@ -30,7 +55,7 @@ const points = computed(() => {
 })
 
 // Catmull-Rom -> kübik Bezier dönüşümü: noktalar arasında yumuşak/eğrisel
-// bir çizgi üretir (düz kırık çizgi yerine).
+// bir çizgi üretir (düz kırık çizgi yerine), tek parça sürekli bir path olarak.
 const linePath = computed(() => {
   const pts = points.value
   if (!pts.length) return ''
@@ -56,14 +81,16 @@ const areaPath = computed(() => {
   if (!pts.length) return ''
   const last = pts[pts.length - 1]
   const first = pts[0]
-  return `${linePath.value} L ${last.x} 100 L ${first.x} 100 Z`
+  return `${linePath.value} L ${last.x} ${props.height} L ${first.x} ${props.height} Z`
 })
+
+const baselineY = computed(() => props.height - PAD_BOTTOM + 1)
 </script>
 
 <template>
-  <div class="rf-line-chart w-full">
+  <div ref="containerEl" class="rf-line-chart w-full">
     <svg
-      viewBox="0 0 100 100"
+      :viewBox="`0 0 ${width} ${height}`"
       preserveAspectRatio="none"
       class="w-full"
       :style="{ height: `${height}px` }"
@@ -81,17 +108,16 @@ const areaPath = computed(() => {
         </linearGradient>
       </defs>
 
-      <line x1="0" y1="99" x2="100" y2="99" stroke="#e2e8f0" stroke-width="0.3" />
+      <line x1="0" :y1="baselineY" :x2="width" :y2="baselineY" stroke="#e2e8f0" stroke-width="1" />
 
       <path :d="areaPath" fill="url(#rf-line-area)" class="rf-line-area" />
       <path
         :d="linePath"
         fill="none"
         stroke="url(#rf-line-stroke)"
-        stroke-width="1.6"
+        stroke-width="2.5"
         stroke-linecap="round"
         stroke-linejoin="round"
-        vector-effect="non-scaling-stroke"
         class="rf-line-stroke"
       />
 
@@ -100,11 +126,10 @@ const areaPath = computed(() => {
         :key="idx"
         :cx="pt.x"
         :cy="pt.y"
-        r="1.3"
+        r="3.5"
         fill="white"
         stroke="var(--primary-color)"
-        stroke-width="0.9"
-        vector-effect="non-scaling-stroke"
+        stroke-width="2"
         class="rf-line-dot"
         :style="{ animationDelay: `${idx * 45}ms` }"
       >
@@ -125,25 +150,15 @@ const areaPath = computed(() => {
 </template>
 
 <style scoped>
-.rf-line-area {
-  animation: rf-line-fade 0.8s ease both;
-}
-
+.rf-line-area,
 .rf-line-stroke {
-  stroke-dasharray: 400;
-  stroke-dashoffset: 400;
-  animation: rf-line-draw 1s cubic-bezier(0.34, 1, 0.64, 1) both;
+  opacity: 0;
+  animation: rf-line-fade 0.6s ease both;
 }
 
 .rf-line-dot {
   opacity: 0;
   animation: rf-line-fade 0.5s ease both;
-}
-
-@keyframes rf-line-draw {
-  to {
-    stroke-dashoffset: 0;
-  }
 }
 
 @keyframes rf-line-fade {

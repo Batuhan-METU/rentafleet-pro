@@ -1,12 +1,27 @@
 <script setup>
 import { ref, nextTick, watch, onBeforeUnmount, computed } from 'vue'
 import { storeToRefs } from 'pinia'
-import { streamAiConsult } from '../services/aiConsultStream.js'
+import { streamAiConsult, confirmAiAction } from '../services/aiConsultStream.js'
 import { formatAiMarkdown } from '../utils/aiMarkdown.js'
 import { useUiStore } from '../stores/uiStore.js'
 import { useBrandingStore } from '../stores/brandingStore.js'
 
 const TYPEWRITER_MS = 22
+const MAX_HISTORY_TURNS = 12
+
+const ACTION_RESULT_LABELS = {
+  create_rental: 'Kiralama',
+  cancel_rental: 'İptal',
+  return_vehicle: 'Teslim alma',
+  extend_rental: 'Uzatma',
+  create_driver: 'Sürücü kaydı',
+  create_loan: 'Kredi kaydı',
+  create_vehicle_expense: 'Gider kaydı',
+  create_vehicle_income: 'Gelir kaydı',
+  create_insurance_policy: 'Sigorta poliçesi',
+  create_overhead_expense: 'Genel gider kaydı',
+  create_loan_allocation: 'Kredi tahsisi',
+}
 
 const ui = useUiStore()
 const branding = useBrandingStore()
@@ -31,7 +46,10 @@ const suggestions = [
 
 const scrollAnchor = ref(null)
 const messagesContainer = ref(null)
-const activeTypewriters = new Set()
+// index -> pending setTimeout id (Set değil Map: unmount'ta bekleyen
+// zamanlayıcıları gerçekten iptal edebilmek için — sadece indeksleri
+// tutmak zamanlayıcıyı durdurmaz, yalnızca "aktif" muhasebesini siler.
+const activeTypewriters = new Map()
 
 const headerGradient = computed(() =>
   `linear-gradient(135deg, ${branding.secondary_color}, ${branding.primary_color})`,
@@ -64,7 +82,6 @@ function isTyping(msg) {
 
 function startTypewriter(index) {
   if (activeTypewriters.has(index)) return
-  activeTypewriters.add(index)
 
   const tick = () => {
     const msg = messages.value[index]
@@ -76,18 +93,19 @@ function startTypewriter(index) {
     const target = msg.fullText ?? msg.text ?? ''
     if (msg.text.length < target.length) {
       msg.text += target[msg.text.length]
-      setTimeout(tick, TYPEWRITER_MS)
+      activeTypewriters.set(index, setTimeout(tick, TYPEWRITER_MS))
       return
     }
 
     if (msg.streaming) {
-      setTimeout(tick, TYPEWRITER_MS)
+      activeTypewriters.set(index, setTimeout(tick, TYPEWRITER_MS))
       return
     }
 
     activeTypewriters.delete(index)
   }
 
+  activeTypewriters.set(index, undefined)
   tick()
 }
 
@@ -95,10 +113,18 @@ function toggle() {
   ui.toggleAiChat()
 }
 
+function buildHistory() {
+  return messages.value
+    .filter((m) => !m.kind && m.text)
+    .slice(-MAX_HISTORY_TURNS)
+    .map((m) => ({ role: m.role, text: m.text }))
+}
+
 async function send(text) {
   const query = (text ?? input.value).trim()
   if (!query || loading.value) return
 
+  const history = buildHistory()
   messages.value.push({ role: 'user', text: query, streaming: false })
   input.value = ''
   loading.value = true
@@ -107,11 +133,22 @@ async function send(text) {
   messages.value.push({ role: 'ai', text: '', fullText: '', streaming: true })
 
   try {
-    await streamAiConsult(query, {
+    await streamAiConsult(query, history, {
       onChunk: (chunk) => {
         if (loading.value) loading.value = false
         messages.value[aiIndex].fullText += chunk
         startTypewriter(aiIndex)
+      },
+      onConfirmation: (confirmation) => {
+        loading.value = false
+        messages.value.push({
+          role: 'ai',
+          kind: 'confirmation',
+          actionId: confirmation.action_id,
+          tool: confirmation.tool,
+          summary: confirmation.summary,
+          status: 'pending',
+        })
       },
       onDone: () => {
         loading.value = false
@@ -151,7 +188,36 @@ async function send(text) {
   }
 }
 
+function appendAiText(text) {
+  messages.value.push({ role: 'ai', text: '', fullText: text, streaming: false })
+  startTypewriter(messages.value.length - 1)
+}
+
+async function confirmAction(msg) {
+  if (msg.status !== 'pending') return
+  msg.status = 'confirming'
+  try {
+    const result = await confirmAiAction(msg.actionId)
+    msg.status = 'done'
+    const label = ACTION_RESULT_LABELS[msg.tool] || 'İşlem'
+    appendAiText(result?.message ? `✅ ${result.message}` : `✅ ${label} başarıyla oluşturuldu.`)
+  } catch (err) {
+    msg.status = 'error'
+    msg.errorText = err?.response?.data?.error || 'İşlem gerçekleştirilemedi, lütfen tekrar deneyin.'
+  } finally {
+    scrollToBottom()
+  }
+}
+
+function cancelAction(msg) {
+  if (msg.status !== 'pending') return
+  msg.status = 'cancelled'
+}
+
 onBeforeUnmount(() => {
+  for (const timeoutId of activeTypewriters.values()) {
+    clearTimeout(timeoutId)
+  }
   activeTypewriters.clear()
 })
 </script>
@@ -218,6 +284,44 @@ onBeforeUnmount(() => {
             </div>
 
             <div
+              v-if="msg.kind === 'confirmation'"
+              class="max-w-[82%] rounded-3xl rounded-bl-md border border-amber-300/60 bg-amber-50/80 px-4 py-3.5 text-sm shadow-sm"
+            >
+              <!-- eslint-disable-next-line vue/no-v-html -->
+              <div class="ai-prose text-slate-700" v-html="formatAiMarkdown(msg.summary)" />
+
+              <div v-if="msg.status === 'pending' || msg.status === 'confirming'" class="mt-3 flex gap-2">
+                <button
+                  type="button"
+                  :disabled="msg.status === 'confirming'"
+                  class="rounded-xl px-3.5 py-2 text-xs font-bold text-white transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-60"
+                  :style="{ background: `linear-gradient(135deg, ${branding.primary_color}, ${branding.secondary_color})` }"
+                  @click="confirmAction(msg)"
+                >
+                  {{ msg.status === 'confirming' ? 'Uygulanıyor…' : 'Onayla' }}
+                </button>
+                <button
+                  type="button"
+                  :disabled="msg.status === 'confirming'"
+                  class="rounded-xl border border-slate-300 bg-white/70 px-3.5 py-2 text-xs font-bold text-slate-600 transition-all duration-200 hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+                  @click="cancelAction(msg)"
+                >
+                  İptal
+                </button>
+              </div>
+              <p v-else-if="msg.status === 'cancelled'" class="mt-2 text-xs font-semibold text-slate-500">
+                İptal edildi.
+              </p>
+              <p v-else-if="msg.status === 'error'" class="mt-2 text-xs font-semibold text-rose-600">
+                {{ msg.errorText }}
+              </p>
+              <p v-else-if="msg.status === 'done'" class="mt-2 text-xs font-semibold text-emerald-600">
+                ✓ Onaylandı
+              </p>
+            </div>
+
+            <div
+              v-else
               class="max-w-[82%] px-4 py-3 text-sm shadow-sm transition-all duration-300"
               :class="[
                 msg.role === 'user'
@@ -227,11 +331,15 @@ onBeforeUnmount(() => {
               ]"
               :style="msg.role === 'user' ? { background: `linear-gradient(135deg, ${branding.primary_color}, color-mix(in srgb, ${branding.primary_color} 80%, ${branding.secondary_color}))` } : undefined"
             >
+              <!-- formatAiMarkdown() HTML-escapes all source text before wrapping it
+                   in hardcoded markup tags, so this v-html is not an XSS vector. -->
+              <!-- eslint-disable vue/no-v-html -->
               <div
                 v-if="msg.role === 'ai' && msg.text"
                 class="ai-prose"
                 v-html="renderAiHtml(msg)"
               />
+              <!-- eslint-enable vue/no-v-html -->
               <span v-else-if="msg.role === 'user'" class="font-medium">{{ msg.text }}</span>
               <span
                 v-else-if="msg.streaming"

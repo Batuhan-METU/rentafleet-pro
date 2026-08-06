@@ -1,8 +1,12 @@
 <script setup>
 // Aktif kiralama uzatma modalı — yeni dönüş tarihini seçer, sunucu aracın
-// o aralıkta başka bir rezervasyonu olup olmadığını kontrol eder.
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+// o aralıkta başka bir kiralaması olup olmadığını kontrol eder.
+import { computed, ref } from 'vue'
 import { useRentalStore } from '../stores/rentalStore.js'
+import { getApiErrorMessage } from '../utils/apiError.js'
+import { useModalLifecycle } from '../composables/useModalLifecycle.js'
+import DatePicker from './vehicle-form/DatePicker.vue'
+import TimePicker from './vehicle-form/TimePicker.vue'
 
 const props = defineProps({
   rental: { type: Object, required: true },
@@ -11,52 +15,42 @@ const emit = defineEmits(['close', 'extended'])
 
 const rentalStore = useRentalStore()
 
-function toLocalInputValue(iso) {
-  const d = iso ? new Date(iso) : new Date()
-  d.setMinutes(d.getMinutes() - d.getTimezoneOffset())
-  return d.toISOString().slice(0, 16)
+function pad(n) {
+  return String(n).padStart(2, '0')
 }
 
-function addDaysToInput(iso, days) {
-  const d = iso ? new Date(iso) : new Date()
-  d.setDate(d.getDate() + days)
-  d.setMinutes(d.getMinutes() - d.getTimezoneOffset())
-  return d.toISOString().slice(0, 16)
-}
+// Varsayılan: mevcut planlanan bitişten 1 gün sonrası, AYNI saatte (kullanıcının
+// zaten anlaştığı teslim saatini korur).
+const initial = props.rental.ended_at ? new Date(props.rental.ended_at) : new Date()
+initial.setDate(initial.getDate() + 1)
 
-const newEndedAt = ref(addDaysToInput(props.rental.ended_at, 1))
+const newEndedDate = ref(`${initial.getFullYear()}-${pad(initial.getMonth() + 1)}-${pad(initial.getDate())}`)
+const newEndedTime = ref(`${pad(initial.getHours())}:${pad(initial.getMinutes())}`)
 const submitError = ref('')
 const isSubmitting = ref(false)
+
+const newEndedAtIso = computed(() => {
+  if (!newEndedDate.value || !newEndedTime.value) return null
+  return new Date(`${newEndedDate.value}T${newEndedTime.value}:00`).toISOString()
+})
 
 async function confirmExtend() {
   submitError.value = ''
   isSubmitting.value = true
   try {
     await rentalStore.extendRental(props.rental.id, {
-      new_ended_at: new Date(newEndedAt.value).toISOString(),
+      new_ended_at: newEndedAtIso.value,
     })
     emit('extended')
     emit('close')
   } catch (err) {
-    submitError.value = err?.response?.data?.error ?? 'Uzatma işlemi tamamlanamadı.'
+    submitError.value = getApiErrorMessage(err, 'Uzatma işlemi tamamlanamadı.')
   } finally {
     isSubmitting.value = false
   }
 }
 
-function onKeydown(event) {
-  if (event.key === 'Escape') emit('close')
-}
-
-onMounted(() => {
-  document.addEventListener('keydown', onKeydown)
-  document.body.style.overflow = 'hidden'
-})
-
-onBeforeUnmount(() => {
-  document.removeEventListener('keydown', onKeydown)
-  document.body.style.overflow = ''
-})
+useModalLifecycle(() => emit('close'))
 </script>
 
 <template>
@@ -73,8 +67,8 @@ onBeforeUnmount(() => {
 
         <header class="flex items-start justify-between gap-4 px-6 pt-5">
           <div>
-            <h2 class="text-lg font-black text-slate-900">Rezervasyonu Uzat</h2>
-            <p class="mt-0.5 text-sm text-slate-500">{{ rental.plaka }} — {{ rental.marka_model }}</p>
+            <h2 class="text-lg font-black text-slate-900">Kiralamayı Uzat</h2>
+            <p class="mt-0.5 text-sm text-slate-500">{{ rental.plate_number }} — {{ rental.brand_model }}</p>
           </div>
           <button
             type="button"
@@ -90,18 +84,21 @@ onBeforeUnmount(() => {
         <div class="space-y-4 px-6 py-5">
           <div>
             <label class="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">
-              Yeni Dönüş Tarihi
+              Yeni Dönüş Tarihi ve Saati
             </label>
-            <input v-model="newEndedAt" type="datetime-local" class="rf-input" />
+            <div class="flex gap-2">
+              <DatePicker v-model="newEndedDate" />
+              <TimePicker v-model="newEndedTime" />
+            </div>
             <p class="mt-1 text-xs text-slate-400">
-              Mevcut planlanan dönüş: {{ rental.bitis || rental.ended_at }}
+              Mevcut planlanan dönüş: {{ rental.ended_at }}
             </p>
           </div>
 
           <div class="rounded-2xl bg-slate-50 p-4 text-sm text-slate-600 ring-1 ring-slate-200">
             Ötelenen süre boyunca araç Aktif kalır, ceza uygulanmaz. Kiralama kapandığında
             "Geç Teslim Alınanlar" listesine düşer ve fiyat farkı (orijinal tarih ↔ ötelenen tarih)
-            gösterilir. Aracın seçilen tarihte başka bir rezervasyonu varsa uzatma reddedilir.
+            gösterilir. Aracın seçilen tarihte başka bir kiralaması varsa uzatma reddedilir.
           </div>
 
           <p v-if="submitError" class="text-sm font-semibold text-rose-600">{{ submitError }}</p>

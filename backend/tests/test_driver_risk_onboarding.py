@@ -9,38 +9,18 @@ import pytest
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.exceptions import ValidationError
-from rest_framework.test import APIClient
 
 from backend.application.driver.evaluate_driver import DriverEvaluationService
-from backend.application.rental.reservation_guard import enforce_risk_and_eligibility
-from backend.apps.companies.models import Company, CustomUser, UserRole
+from backend.application.rental.rental_guard import enforce_risk_and_eligibility
 from backend.apps.customer_profiles.models import Driver
-from backend.apps.risk_checks.models import CustomerFinancialProfile, CustomerLicenseProfile
+from backend.apps.risk_checks.models import (
+    CustomerFinancialProfile,
+    CustomerLicenseProfile,
+    CustomerRiskSnapshot,
+)
 from backend.apps.vehicles.models import Vehicle, VehicleStatus
 
 pytestmark = pytest.mark.django_db
-
-
-@pytest.fixture
-def company() -> Company:
-    return Company.objects.create(name="onboarding-tenant", tax_number="6660001111")
-
-
-@pytest.fixture
-def manager(company: Company) -> CustomUser:
-    return CustomUser.objects.create_user(
-        username="onboarding_mgr",
-        password="test-pass-123",
-        company=company,
-        role=UserRole.FLEET_MANAGER,
-    )
-
-
-@pytest.fixture
-def client(manager: CustomUser) -> APIClient:
-    api_client = APIClient()
-    api_client.force_authenticate(user=manager)
-    return api_client
 
 
 def _driver_payload() -> dict:
@@ -76,6 +56,62 @@ def test_driver_create_via_api_gets_immediate_risk_score(client):
     assert driver.risk_note is not None
 
 
+def test_driver_create_via_api_writes_exactly_one_risk_snapshot(client, django_capture_on_commit_callbacks):
+    # Regresyon: `Driver.objects.create(...)` içindeki post_save sinyali
+    # (apps/customer_profiles/signals.py) `transaction.on_commit` ile
+    # ertelenir. `DriverCreateView.post()` tek bir `transaction.atomic()`
+    # bloğu içinde çalışmadan ÖNCE, bu istekte on_commit gerçek ortamda
+    # neredeyse ANINDA (view'ın kendi profil-uygulama ve evaluate()
+    # çağrılarından ÖNCE) tetikleniyordu — sürücü henüz boş/varsayılan
+    # profille değerlendirilip bir CustomerRiskSnapshot yazılıyor, ardından
+    # view'ın kendi (doğru) evaluate() çağrısı İKİNCİ bir snapshot daha
+    # yazıyordu. `django_capture_on_commit_callbacks(execute=True)` testte
+    # normalde hiç tetiklenmeyen on_commit'i gerçek ortamdaki gibi
+    # zorluyor — bu yüzden düzeltme olmadan bu test 2 snapshot görürdü.
+    with django_capture_on_commit_callbacks(execute=True):
+        response = client.post("/api/drivers/create/", _driver_payload(), format="json")
+
+    assert response.status_code == status.HTTP_201_CREATED
+    driver = Driver.objects.get(pk=response.data["id"])
+    assert CustomerRiskSnapshot.objects.filter(driver=driver).count() == 1
+
+
+def test_driver_create_rejects_invalid_national_id_checksum(client):
+    payload = _driver_payload()
+    # "11111111111" gerçek T.C. kimlik sağlama algoritmasını sağlamıyor
+    # (10./11. hane tutmuyor) — biçimsel olarak 11 haneli olsa da geçersiz.
+    payload["driver"]["national_id"] = "11111111111"
+
+    response = client.post("/api/drivers/create/", payload, format="json")
+
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+    assert not Driver.objects.filter(national_id="11111111111").exists()
+
+
+def test_driver_create_skips_checksum_for_foreign_national(client):
+    # Yabancı uyruklu sürücülerin kimlik numarası T.C. checksum kuralını
+    # izlemez — is_foreign=True iken format kontrolü (11 hane, 0 ile
+    # başlamama) dışında sağlama toplamına bakılmamalı.
+    payload = _driver_payload()
+    payload["driver"]["national_id"] = "11111111111"
+    payload["driver"]["is_foreign"] = True
+    payload["driver"]["citizenship"] = "DE"
+
+    response = client.post("/api/drivers/create/", payload, format="json")
+
+    assert response.status_code == status.HTTP_201_CREATED
+    assert Driver.objects.filter(national_id="11111111111", is_foreign=True).exists()
+
+
+def test_driver_create_rejects_malformed_national_id_format(client):
+    payload = _driver_payload()
+    payload["driver"]["national_id"] = "12345"  # çok kısa
+
+    response = client.post("/api/drivers/create/", payload, format="json")
+
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+
 def test_driver_post_save_signal_evaluates_on_commit(company, django_capture_on_commit_callbacks):
     with django_capture_on_commit_callbacks(execute=True):
         Driver.objects.create(
@@ -95,19 +131,22 @@ def test_driver_post_save_signal_evaluates_on_commit(company, django_capture_on_
 
 
 def test_low_risk_driver_rejected_for_premium_vehicle(company):
+    # Yaş/ehliyet süresi kasıtlı olarak "severe" risk kademesine (yaş<19 /
+    # ehliyet<6 ay) düşmeyecek şekilde seçildi — HIGH bandında kalıp
+    # BLOCK eşiğine (VERY_HIGH) taşmaması gerekiyor (bkz. domain/risk/rules.py).
     driver = Driver.objects.create(
         company=company,
         first_name="Riskli",
         last_name="Surucu",
         national_id="22222222220",
-        birth_date=date.today() - timedelta(days=365 * 19),
+        birth_date=date.today() - timedelta(days=365 * 20 + 100),
         phone="5551112233",
         license_number="X123456",
         city="Ankara",
     )
     CustomerLicenseProfile.objects.create(
         driver=driver,
-        license_issue_date=date.today() - timedelta(days=180),
+        license_issue_date=date.today() - timedelta(days=400),
     )
     CustomerFinancialProfile.objects.create(
         driver=driver,
@@ -203,7 +242,7 @@ def test_driver_list_filters_by_vehicle_eligibility(client, company):
 
     response = client.get(f"/api/drivers/?vehicle_id={premium.pk}")
     assert response.status_code == status.HTTP_200_OK
-    ids = {item["id"] for item in response.data["surucular"]}
+    ids = {item["id"] for item in response.data["drivers"]}
     assert high_risk.pk not in ids
     if low_risk.risk_level in {"VERY_LOW", "LOW"}:
         assert low_risk.pk in ids

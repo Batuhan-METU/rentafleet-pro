@@ -38,6 +38,7 @@ ENV/
 # --- Django ---
 db.sqlite3
 db.sqlite3-journal
+db.sqlite3.bak_*
 /staticfiles/
 /media/
 local_settings.py
@@ -86,6 +87,10 @@ test-results/
 # --- ClickHouse / data dumps ---
 *.dump
 *.sql.gz
+dump.rdb
+
+# --- Real/sensitive source financial data (never public) ---
+/datas/
 
 # --- Cursor / local tooling ---
 .cursor/

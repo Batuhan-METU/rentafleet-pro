@@ -6,10 +6,10 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
-import { useVehicleStore } from '../stores/vehicleStore.js'
+import { useVehicleLiveTrackingStore } from '../stores/vehicleLiveTrackingStore.js'
 import { VEHICLE_STATUS_LABELS } from '../utils/vehicleStatus.js'
 
-const store = useVehicleStore()
+const store = useVehicleLiveTrackingStore()
 
 const ANKARA = [39.9334, 32.8597]
 const SPEEDING_KMH = 120
@@ -32,19 +32,19 @@ const lastUpdate = ref(null)
 
 // Haritada gösterilebilen (konumu olan) araçlar.
 const trackable = computed(() =>
-  store.liveVehicles.filter((v) => v.enlem != null && v.boylam != null),
+  store.liveVehicles.filter((v) => v.latitude != null && v.longitude != null),
 )
-const movingCount = computed(() => trackable.value.filter((v) => v.hiz > 0).length)
-const rentedCount = computed(() => trackable.value.filter((v) => v.durum_kodu === 'RENTED').length)
-const criticalCount = computed(() => trackable.value.filter((v) => v.kritik_anomali).length)
+const movingCount = computed(() => trackable.value.filter((v) => v.speed > 0).length)
+const rentedCount = computed(() => trackable.value.filter((v) => v.status_code === 'RENTED').length)
+const criticalCount = computed(() => trackable.value.filter((v) => v.critical_anomaly).length)
 
 function vehicleColor(v) {
-  if (v.kritik_anomali) return CRITICAL_COLOR
-  return STATUS[v.durum_kodu]?.color ?? '#64748b'
+  if (v.critical_anomaly) return CRITICAL_COLOR
+  return STATUS[v.status_code]?.color ?? '#64748b'
 }
 
 function makeIcon(v) {
-  const cls = 'rf-marker' + (v.kritik_anomali ? ' rf-marker--critical' : '')
+  const cls = 'rf-marker' + (v.critical_anomaly ? ' rf-marker--critical' : '')
   return L.divIcon({
     className: '',
     html: `<div class="${cls}" style="background:${vehicleColor(v)}"></div>`,
@@ -55,18 +55,18 @@ function makeIcon(v) {
 }
 
 function popupHtml(v) {
-  const status = STATUS[v.durum_kodu]
-  const critical = v.kritik_anomali
+  const status = STATUS[v.status_code]
+  const critical = v.critical_anomaly
     ? `<div style="margin-top:6px;padding:4px 8px;border-radius:6px;background:#fee2e2;color:#991b1b;font-weight:700;font-size:11px">🚨 KRİTİK ANOMALİ</div>`
     : ''
   return `
     <div style="min-width:190px;font-family:system-ui">
-      <div style="font-weight:700;font-size:13px;color:#0f172a">${v.plaka}</div>
-      <div style="color:#64748b;font-size:12px;margin-bottom:6px">${v.marka_model_sinif || v.marka_model}</div>
+      <div style="font-weight:700;font-size:13px;color:#0f172a">${v.plate_number}</div>
+      <div style="color:#64748b;font-size:12px;margin-bottom:6px">${v.brand_model_segment || v.brand_model}</div>
       <div style="font-size:12px;line-height:1.7">
-        <div>Güncel Durum: <b style="color:${status?.color ?? '#64748b'}">${v.durum}</b></div>
-        <div>Hız: <b${v.hiz > SPEEDING_KMH ? ' style="color:#dc2626"' : ''}>${v.hiz} km/s</b></div>
-        <div>Yakıt Durumu: <b>%${v.yakit_seviyesi ?? '—'}</b></div>
+        <div>Güncel Durum: <b style="color:${status?.color ?? '#64748b'}">${v.status_label}</b></div>
+        <div>Hız: <b${v.speed > SPEEDING_KMH ? ' style="color:#dc2626"' : ''}>${v.speed} km/s</b></div>
+        <div>Yakıt Durumu: <b>%${v.fuel_level ?? '—'}</b></div>
       </div>
       ${critical}
     </div>`
@@ -78,8 +78,8 @@ function syncMarkers() {
 
   for (const v of trackable.value) {
     seen.add(v.id)
-    const latlng = [v.enlem, v.boylam]
-    const sig = `${v.durum_kodu}|${v.kritik_anomali}`
+    const latlng = [v.latitude, v.longitude]
+    const sig = `${v.status_code}|${v.critical_anomaly}`
     const entry = markers[v.id]
 
     if (entry) {
@@ -106,7 +106,7 @@ function syncMarkers() {
   }
 
   if (!didFit && trackable.value.length) {
-    map.fitBounds(L.latLngBounds(trackable.value.map((v) => [v.enlem, v.boylam])), {
+    map.fitBounds(L.latLngBounds(trackable.value.map((v) => [v.latitude, v.longitude])), {
       padding: [50, 50],
       maxZoom: 13,
     })

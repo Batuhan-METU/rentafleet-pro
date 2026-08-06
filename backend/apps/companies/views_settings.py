@@ -7,10 +7,10 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from backend.apps.companies.models import Company
-from backend.common.permissions import IsFleetManager
 from backend.apps.companies.serializers import CompanySerializer, CompanySettingsSerializer
 from backend.common.multitenancy_tools.branding import company_branding_payload
 from backend.common.multitenancy_tools.scope import require_user_company
+from backend.common.permissions import IsFleetManager
 
 
 class CompanySettingsView(APIView):

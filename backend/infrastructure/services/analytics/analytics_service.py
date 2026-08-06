@@ -17,15 +17,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from backend.infrastructure.clickhouse.client import suppress_http_warnings
 from backend.apps.customer_profiles.models import Driver
 from backend.apps.vehicles.models import (
     Vehicle,
     VehicleStatus,
 )
-from backend.infrastructure.services.analytics.anomaly_service import detect_fleet_critical_vehicle_ids
-from backend.infrastructure.services.common.logging_utils import quiet_loggers
+from backend.infrastructure.clickhouse.client import suppress_http_warnings
+from backend.infrastructure.services.analytics.anomaly_service import (
+    detect_fleet_critical_vehicle_ids,
+)
 from backend.infrastructure.services.analytics.scoring_service import calculate_driver_score
+from backend.infrastructure.services.common.logging_utils import quiet_loggers
 
 WEEKDAYS_TR = ("Pzt", "Sal", "Çar", "Per", "Cum", "Cmt", "Paz")
 # Hafta boyunca kümülatif tasarruf kazanımı (yüzde puan) — yukarı yönlü trend.
@@ -56,7 +58,7 @@ def _weekly_savings_trend(avg_score: float) -> list[dict]:
     base = max(5.0, min(12.0, 6.0 + (avg_score - 70.0) * 0.08))
     return [
         {"gun": day, "tasarruf": round(base + gain, 1)}
-        for day, gain in zip(WEEKDAYS_TR, _WEEKLY_GAIN)
+        for day, gain in zip(WEEKDAYS_TR, _WEEKLY_GAIN, strict=True)
     ]
 
 

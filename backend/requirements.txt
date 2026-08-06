@@ -1,0 +1,50 @@
+# RentA-Fleet PRO — Backend dependencies
+# Pinned for reproducible builds. Update deliberately.
+
+# --- Core framework ---
+Django==6.0.6
+djangorestframework==3.17.1
+django-cors-headers==4.9.0
+
+# --- PostgreSQL (OLTP / relational store) ---
+# psycopg 3 is the modern, Django-native driver. The [binary] extra ships
+# a precompiled libpq so no system-level Postgres dev headers are required.
+psycopg[binary]==3.3.4
+# Parses a single DATABASE_URL (Render/Heroku/Neon-style connection string)
+# into Django's DATABASES dict — used only when DATABASE_URL is set;
+# local dev keeps using the separate POSTGRES_*/sqlite settings below.
+dj-database-url==3.0.1
+
+# --- Production WSGI server + static file serving ---
+gunicorn==23.0.0
+# Serves the built Vue SPA (frontend/dist/) AND Django's own static files
+# (admin CSS/JS) directly from the Django process — no separate static
+# host/CDN needed for a single-service deploy (see settings.py WHITENOISE_*).
+whitenoise==6.11.0
+
+# --- ClickHouse (OLAP / time-series telemetry store) ---
+clickhouse-connect==1.4.0
+
+# --- Configuration ---
+python-dotenv==1.2.2
+
+# --- Reporting (filo envanteri Excel dışa aktarma) ---
+openpyxl==3.1.5
+
+# --- AI (Fleet Consultant; optional, falls back if key absent) ---
+openai==2.44.0
+
+# --- Cache + background jobs (optional; falls back to in-process behavior
+# if REDIS_URL is unset — see settings.py CACHES / backend/celery_app.py) ---
+redis==8.1.0
+celery==5.6.3
+
+# --- Error tracking / APM (optional; no-op if SENTRY_DSN is unset) ---
+sentry-sdk==2.66.1
+
+# --- Development / seeding ---
+Faker==37.12.0
+
+# --- Testing ---
+pytest==9.1.1
+pytest-django==4.12.0

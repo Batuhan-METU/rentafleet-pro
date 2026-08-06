@@ -2,7 +2,8 @@
 
 Multi-tenant shared DB: her filo kullanıcısı tek bir ``Company`` şirketine bağlıdır.
 Subdomain veya ``?company=`` ile çözümlenen şirket, oturum açmış kullanıcının
-şirketiyle eşleşmelidir (``CompanyAccessMiddleware`` + login kontrolü).
+şirketiyle eşleşmelidir — bu eşleşme ``user_matches_company()`` üzerinden
+aşağıdaki izin sınıflarında (permission classes) kontrol edilir.
 
 Roller:
 

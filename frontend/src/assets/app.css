@@ -13,6 +13,11 @@
   /* Manrope: başlıklar ve büyük rakamlar için — Inter'den ayrışan, biraz daha
      karakterli bir görüntü yüzü. Gövde metni Inter'de kalır. */
   --font-display: "Manrope", "Inter", system-ui, -apple-system, sans-serif;
+  /* Fira Code: parasal/sayısal rakamlar için — sabit genişlikli haneler
+     dashboard'larda tutarların taranmasını kolaylaştırır (bkz. araç detay
+     sayfası finansal kartları). Sadece rakamlara uygulanır, gövde metni
+     Inter'de kalır. */
+  --font-mono: "Fira Code", ui-monospace, "SFMono-Regular", Menlo, monospace;
 }
 
 :root {
@@ -188,6 +193,22 @@
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary-color) 15%, transparent);
   }
 
+  /* --- Araç ekleme sihirbazı: içi dolu modal üzerinde şeffaf .rf-input
+     neredeyse görünmez kalıyor (glassmorphism, gradyan arka plan için
+     tasarlanmış) — burada hafif gri, net sınırlı bir alan kullanılır. */
+  .vf-input {
+    @apply w-full rounded-xl border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-800 outline-none transition-colors duration-150;
+  }
+
+  .vf-input:focus {
+    @apply border-brand-500 bg-white;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary-color) 15%, transparent);
+  }
+
+  .vf-input:disabled {
+    @apply cursor-not-allowed opacity-60;
+  }
+
   .rf-btn-primary {
     @apply inline-flex items-center justify-center gap-2 rounded-full px-5 py-2.5 text-sm font-bold transition-all duration-300 ease-in-out;
     background: linear-gradient(135deg, var(--primary-color), color-mix(in srgb, var(--primary-color) 80%, var(--secondary-color)));
@@ -200,6 +221,26 @@
   }
 
   .rf-btn-primary:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+
+  .rf-btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-full px-5 py-2.5 text-sm font-bold text-slate-700 transition-all duration-300 ease-in-out;
+    background: var(--rf-glass-bg);
+    backdrop-filter: blur(var(--rf-glass-blur));
+    -webkit-backdrop-filter: blur(var(--rf-glass-blur));
+    border: 1px solid var(--rf-glass-border);
+    box-shadow: 0 2px 12px rgba(15, 23, 42, 0.06);
+  }
+
+  .rf-btn-secondary:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.7);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 18px rgba(15, 23, 42, 0.1);
+  }
+
+  .rf-btn-secondary:disabled {
     opacity: 0.55;
     cursor: not-allowed;
   }

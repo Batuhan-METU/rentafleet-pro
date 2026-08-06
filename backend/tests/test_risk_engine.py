@@ -15,7 +15,7 @@ from backend.tests.factories import make_snapshot
 def _engine() -> RiskEngine:
     # DB'ye gitmeden (RuleSet sorgusu yapmadan) kod tabanlı varsayılan
     # kurallarla çalışan bir RiskEngine — domain katmanı DB'siz test edilebilir.
-    return RiskEngine(RuleEngine("RISK", build_default_risk_rules()), company_id=1)
+    return RiskEngine(RuleEngine("RISK", build_default_risk_rules()))
 
 
 def test_clean_customer_is_very_low_risk_and_approved():
@@ -37,16 +37,26 @@ def test_young_driver_and_new_license_stack_score():
     snapshot = make_snapshot(age=19, license_age_years=0.5)
     result = _engine().evaluate(snapshot)
 
-    # YOUNG_DRIVER (20) + NEW_LICENSE (18) = 38
-    assert result.score == 38
+    # YOUNG_DRIVER_MODERATE (15, 19<=yaş<21) + NEW_LICENSE_MODERATE (15, 0.5-2 yıl) = 30
+    assert result.score == 30
     assert result.level == RiskLevel.LOW.value
     assert result.approved is True
 
 
+def test_severe_young_driver_and_new_license_score_higher_than_moderate():
+    """Kademeli puanlama: 18 yaş/3 ay ehliyet, 19 yaş/6 ay ehliyetten daha
+    yüksek puan almalı (eskiden ikisi de aynı sabit puanı alıyordu)."""
+    moderate = _engine().evaluate(make_snapshot(age=19, license_age_years=0.5))
+    severe = _engine().evaluate(make_snapshot(age=18, license_age_years=0.25))
+
+    assert severe.score > moderate.score
+
+
 def test_very_high_score_triggers_hard_block_at_threshold():
     # Findeks düşük (22) + gelir düşük (8, WARN puana katkı yapmaz) + ödeme
-    # gecikmesi (12) + hasar (10) + kaza (15) + geç teslim (8) + trafik cezası
-    # (6) + genç sürücü (20) + yeni ehliyet (18) = 111 -> clamp 100 -> VERY_HIGH
+    # gecikmesi (12) + hasar (10) + kaza (15) + geç teslim - tek sefer (6) +
+    # trafik cezası (6) + genç sürücü orta kademe (15) + yeni ehliyet orta
+    # kademe (15) = 101 -> clamp 100 -> VERY_HIGH
     snapshot = make_snapshot(
         age=19,
         license_age_years=0.5,
@@ -72,6 +82,34 @@ def test_whitelist_and_loyalty_bonuses_reduce_score_but_never_below_zero():
 
     assert result.score == 0
     assert result.level == RiskLevel.VERY_LOW.value
+
+
+def test_cancellation_rate_rule_fires_above_threshold_with_enough_history():
+    # 3 iptal / (5 tamamlanan + 3 iptal) = %37.5 > %30 eşiği, toplam 8 girişim (>=3).
+    snapshot = make_snapshot(total_rentals=5, cancelled_count=3)
+    result = _engine().evaluate(snapshot)
+
+    assert result.score == 12
+    codes = [o.code for o in result.outcomes]
+    assert "CANCELLATION_RATE" in codes
+
+
+def test_cancellation_rate_rule_does_not_fire_below_threshold():
+    # 1 iptal / 6 girişim = %16.7 < %30 eşiği.
+    snapshot = make_snapshot(total_rentals=5, cancelled_count=1)
+    result = _engine().evaluate(snapshot)
+
+    assert result.score == 0
+
+
+def test_cancellation_rate_rule_does_not_fire_with_too_little_history():
+    # Tek bir iptal, hiç tamamlanmış kiralama yok — oran %100 ama örneklem
+    # (1 girişim < 3) çok küçük, yeni bir sürücüyü haksız damgalamamalı.
+    snapshot = make_snapshot(total_rentals=0, cancelled_count=1)
+    result = _engine().evaluate(snapshot)
+
+    codes = [o.code for o in result.outcomes]
+    assert "CANCELLATION_RATE" not in codes
 
 
 def test_score_to_risk_level_bands_are_contiguous_and_cover_0_to_100():
