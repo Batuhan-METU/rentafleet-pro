@@ -5,6 +5,12 @@ Kapsam: audit sırasında bulunan iki gerçek hata —
    ("acme" / "acmecorp" gibi durumlarda yanlış şirket seçilebiliyordu).
 2. `?company=`/`X-Company-Slug` geliştirme geçişi DEBUG=False iken de
    çalışıyordu (üretimde şirket sahteciliğine izin verebilirdi).
+
+Ve canlı Render dağıtımını bloke eden üçüncü, gerçek bir üretim hatası:
+3. `<servis-adı>.onrender.com` de `acme.rentafleetpro.com` ile AYNI nokta
+   sayısına sahip olduğu için ilk etiket ("servis-adı") yanlışlıkla bir
+   kiracı subdomain'i sanılıyor, var olmayan bir şirket için 404
+   ("Kayıtlı şirket bulunamadı.") dönüyordu — LoginView'a hiç ulaşılamıyordu.
 """
 
 from __future__ import annotations
@@ -14,6 +20,7 @@ import pytest
 from backend.apps.companies.models import Company
 from backend.common.middleware.company_router import (
     _dev_company_slug,
+    extract_subdomain,
     resolve_company_by_subdomain,
 )
 
@@ -60,3 +67,40 @@ def test_dev_company_slug_enabled_in_debug(settings):
     settings.DEBUG = True
     assert _dev_company_slug(_FakeRequest(query="acme")) == "acme"
     assert _dev_company_slug(_FakeRequest(header="acme")) == "acme"
+
+
+def test_real_tenant_subdomain_still_detected():
+    assert extract_subdomain("acme.rentafleetpro.com") == "acme"
+
+
+def test_platform_root_domain_is_not_mistaken_for_a_tenant_subdomain(settings):
+    # Render servis adı ("rentafleet-pro") nokta sayısı bakımından gerçek bir
+    # kiracı subdomain'inden (ör. "acme.rentafleetpro.com") ayırt edilemez —
+    # PLATFORM_ROOT_DOMAINS bu ayrımı açıkça yapar.
+    settings.PLATFORM_ROOT_DOMAINS = ["onrender.com"]
+    assert extract_subdomain("rentafleet-pro.onrender.com") is None
+    assert extract_subdomain("any-other-service-name.onrender.com") is None
+
+
+def test_bare_platform_root_domain_itself_is_not_a_subdomain(settings):
+    settings.PLATFORM_ROOT_DOMAINS = ["onrender.com"]
+    assert extract_subdomain("onrender.com") is None
+
+
+def test_login_succeeds_on_a_platform_root_domain_host(client, company, manager, settings):
+    """Uçtan uca regresyon: `rentafleet-pro.onrender.com` Host başlığıyla
+    gelen bir giriş isteği, middleware'in 404'üne takılmadan LoginView'a
+    ulaşmalı. `manager` fixture'ı `test-pass-123` şifresiyle oluşturulur
+    (bkz. conftest.py)."""
+    settings.PLATFORM_ROOT_DOMAINS = ["onrender.com"]
+    settings.ALLOWED_HOSTS = ["*"]
+
+    response = client.post(
+        "/api/auth/login/",
+        {"username": manager.username, "password": "test-pass-123"},
+        format="json",
+        HTTP_HOST="rentafleet-pro.onrender.com",
+    )
+
+    assert response.status_code == 200
+    assert response.data["user"]["username"] == manager.username

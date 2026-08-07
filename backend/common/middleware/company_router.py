@@ -28,6 +28,13 @@ def extract_subdomain(host: str) -> str | None:
     hostname = host.split(":")[0].lower().strip()
     if not hostname or hostname in _BARE_HOSTS:
         return None
+    # Render gibi PaaS'lerin kendi kök alan adı (settings.PLATFORM_ROOT_DOMAINS)
+    # — "<servis-adı>.onrender.com" da tam olarak `.rentafleetpro.com` ile aynı
+    # nokta-sayımına sahip ("3 parça") ama ilk etiket bir kiracı subdomain'i
+    # DEĞİL, servisin kendi adıdır. Bu kontrol olmadan servis adı yanlışlıkla
+    # bir kiracı subdomain'i sanılıp var olmayan bir şirket için 404 dönerdi.
+    if any(hostname == root or hostname.endswith(f".{root}") for root in settings.PLATFORM_ROOT_DOMAINS):
+        return None
     parts = hostname.split(".")
     if hostname.endswith(".localhost") and len(parts) >= 2:
         sub = parts[0]

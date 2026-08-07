@@ -60,6 +60,14 @@ ALLOWED_HOSTS = _env_list(
     "localhost,127.0.0.1,.localhost,.rentafleetpro.com",
 )
 
+# PaaS barındırıcıların kendi kök alan adları (ör. Render'ın *.onrender.com'u)
+# — bu tür alan adlarında İLK etiket (ör. "rentafleet-pro") bir kiracı
+# subdomain'i DEĞİL, platformun/servisin kendi adıdır. CompanyRouterMiddleware
+# bunları "bare host" (subdomain'siz) olarak ele alır; aksi halde her istek
+# var olmayan bir "rentafleet-pro" adlı şirket aranıp 404 ile reddedilirdi
+# (gerçek bir üretim hatası — bkz. common/middleware/company_router.py).
+PLATFORM_ROOT_DOMAINS = _env_list("DJANGO_PLATFORM_ROOT_DOMAINS", "onrender.com")
+
 # Çok-kiracılı subdomain yapısı için (ör. acme.rentafleetpro.com) — Django
 # 4+ CSRF Origin kontrolü artık zorunlu, bu olmadan her tenant subdomain'inde
 # oturum tabanlı (browsable API/admin) POST istekleri 403 döner.
