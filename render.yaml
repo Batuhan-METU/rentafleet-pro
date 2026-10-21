@@ -1,10 +1,10 @@
-# Render Blueprint — tek komutla (Dashboard → New + → Blueprint) hem web
-# servisini hem ücretsiz Postgres'i kurar. Bkz. README.md "Deploy (Render)".
-databases:
-  - name: rentafleet-db
-    plan: free
-    databaseName: rentafleet
-    user: rentafleet
+# Render Blueprint — tek komutla (Dashboard → New + → Blueprint) web
+# servisini kurar. Bkz. README.md "Deployment".
+#
+# Veritabanı Render'da DEĞİL: Render'ın ücretsiz Postgres'i 30 günde
+# siliniyor. Bunun yerine süresiz ücretsiz bir Postgres (ör. Neon.tech)
+# kullanılır; bağlantı adresi Render panelinde DATABASE_URL olarak girilir
+# (sync: false → repoya hiç yazılmaz, Blueprint senkronu da ezmez).
 
 services:
   - type: web
@@ -30,9 +30,7 @@ services:
       - key: DJANGO_CSRF_TRUSTED_ORIGINS
         value: "https://*.onrender.com"
       - key: DATABASE_URL
-        fromDatabase:
-          name: rentafleet-db
-          property: connectionString
+        sync: false
       - key: OPENAI_API_KEY
         sync: false
       - key: OPENAI_MODEL

@@ -254,10 +254,11 @@ One **Render** web service runs everything. Django serves the API at `/api/*` an
 
 <br/>
 
-1. On [render.com](https://render.com) choose **New + → Blueprint** and connect this repo. Render reads [`render.yaml`](render.yaml) and provisions the web service plus a free PostgreSQL database.
-2. In the service's **Environment** tab, set `OPENAI_API_KEY`. Everything else is already wired up.
-3. Wait for the build, then open the `*.onrender.com` URL.
-4. Seed demo data once from the service's **Shell** tab:
+1. Create a free PostgreSQL database on [Neon](https://neon.tech) and copy its **direct** (non-pooled) connection string.
+2. On [render.com](https://render.com) choose **New + → Blueprint** and connect this repo. Render reads [`render.yaml`](render.yaml) and provisions the web service.
+3. In the service's **Environment** tab, set `DATABASE_URL` to the Neon connection string and `OPENAI_API_KEY` to your key. Everything else is already wired up.
+4. Wait for the build, then open the `*.onrender.com` URL.
+5. Seed demo data once from the service's **Shell** tab:
    ```sh
    python backend/manage.py fleet_ops seed --i-know-this-is-not-prod
    ```
@@ -265,7 +266,7 @@ One **Render** web service runs everything. Django serves the API at `/api/*` an
 **Free-tier notes**
 
 - The service sleeps after 15 minutes idle, so the first request can take 30–60 seconds.
-- Free PostgreSQL expires after 30 days. Point `DATABASE_URL` at any Postgres provider to move it.
+- The database lives on Neon because Render's free PostgreSQL is deleted after 30 days. Any Postgres provider works through `DATABASE_URL`.
 - Wildcard subdomains are not available, so tenants are selected with `?company=<slug>`.
 - Uploaded files are not persisted across deploys on the free tier.
 
