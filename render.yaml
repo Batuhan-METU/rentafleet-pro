@@ -15,8 +15,13 @@ services:
       cd frontend && npm ci && npm run build && cd .. &&
       pip install -r backend/requirements.txt &&
       python backend/manage.py collectstatic --noinput
+    # Demo verisi açılışta otomatik yüklenir (Render Shell ücretli olduğu
+    # için). --if-missing: demo hesaplar zaten varsa hiçbir şey yapmaz.
+    # Seed hata verse bile sunucu yine açılır.
     startCommand: >-
       python backend/manage.py migrate --noinput &&
+      { python backend/manage.py fleet_ops seed --if-missing --i-know-this-is-not-prod ||
+      echo "Demo seed failed; starting server anyway"; } &&
       gunicorn backend.wsgi:application --bind 0.0.0.0:$PORT --timeout 120
     envVars:
       - key: DJANGO_SECRET_KEY

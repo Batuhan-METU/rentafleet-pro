@@ -258,6 +258,15 @@ class Command(BaseCommand):
             help=f"Kiracı başına araç sayısı (varsayılan: {DEFAULT_VEHICLES_PER_TENANT}).",
         )
         seed_parser.add_argument(
+            "--if-missing",
+            action="store_true",
+            help=(
+                "Demo yönetici hesaplarının hepsi zaten varsa hiçbir şey yapma. "
+                "Sunucu açılış komutunda güvenle çalıştırılabilmesi içindir: "
+                "boş bir veritabanını doldurur, mevcut demo verisine dokunmaz."
+            ),
+        )
+        seed_parser.add_argument(
             "--i-know-this-is-not-prod",
             action="store_true",
             help=(
@@ -276,6 +285,12 @@ class Command(BaseCommand):
                 "eminseniz --i-know-this-is-not-prod ile tekrar çalıştırın."
             )
         if options.get("action") == "seed":
+            if options.get("if_missing"):
+                usernames = [spec["manager"]["username"] for spec in TENANT_SPECS]
+                existing = CustomUser.objects.filter(username__in=usernames).count()
+                if existing == len(usernames):
+                    self.stdout.write("Demo tenants already seeded; skipping (--if-missing).")
+                    return
             self._run_seed(
                 flush=bool(options.get("flush")),
                 vehicles_per_tenant=int(options["vehicles"]),

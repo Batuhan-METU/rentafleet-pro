@@ -257,11 +257,7 @@ One **Render** web service runs everything. Django serves the API at `/api/*` an
 1. Create a free PostgreSQL database on [Neon](https://neon.tech) and copy its **direct** (non-pooled) connection string.
 2. On [render.com](https://render.com) choose **New + → Blueprint** and connect this repo. Render reads [`render.yaml`](render.yaml) and provisions the web service.
 3. In the service's **Environment** tab, set `DATABASE_URL` to the Neon connection string and `OPENAI_API_KEY` to your key. Everything else is already wired up.
-4. Wait for the build, then open the `*.onrender.com` URL.
-5. Seed demo data once from the service's **Shell** tab:
-   ```sh
-   python backend/manage.py fleet_ops seed --i-know-this-is-not-prod
-   ```
+4. Wait for the build, then open the `*.onrender.com` URL. The demo companies are seeded automatically on first start, so no Shell access is needed.
 
 **Free-tier notes**
 
