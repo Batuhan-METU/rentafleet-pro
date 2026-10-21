@@ -1,87 +1,215 @@
-# RentA-Fleet PRO
+<div align="center">
 
-Multi-tenant fleet rental management platform: vehicle inventory, driver
-onboarding with automated risk scoring, rental lifecycle (create / extend /
-return), financial decision support (cost analysis, pricing, loan
-allocation), live GPS tracking, and predictive maintenance.
+# 🚗 RentA-Fleet PRO
 
-Turkish is the platform's business language — user-facing strings, most
-domain identifiers, and code comments are in Turkish, since the product
-targets the Turkish rent-a-car market.
+### The all-in-one operating system for rent-a-car fleets
 
-## Architecture
+**Fleet inventory · Driver risk scoring · Rental lifecycle · Cost & pricing intelligence · Live GPS · AI operations agent**
 
-Django REST Framework backend, layered "clean architecture" style:
+<br/>
 
+![Python](https://img.shields.io/badge/Python-3.13-3776AB?style=for-the-badge&logo=python&logoColor=white)
+![Django](https://img.shields.io/badge/Django-6.0-092E20?style=for-the-badge&logo=django&logoColor=white)
+![DRF](https://img.shields.io/badge/DRF-3.17-A30000?style=for-the-badge&logo=django&logoColor=white)
+![Vue](https://img.shields.io/badge/Vue-3.5-4FC08D?style=for-the-badge&logo=vuedotjs&logoColor=white)
+![Vite](https://img.shields.io/badge/Vite-8-646CFF?style=for-the-badge&logo=vite&logoColor=white)
+![Tailwind](https://img.shields.io/badge/Tailwind-4-06B6D4?style=for-the-badge&logo=tailwindcss&logoColor=white)
+
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169E1?style=for-the-badge&logo=postgresql&logoColor=white)
+![ClickHouse](https://img.shields.io/badge/ClickHouse-FFCC01?style=for-the-badge&logo=clickhouse&logoColor=black)
+![Redis](https://img.shields.io/badge/Redis-DC382D?style=for-the-badge&logo=redis&logoColor=white)
+![Celery](https://img.shields.io/badge/Celery-37814A?style=for-the-badge&logo=celery&logoColor=white)
+![OpenAI](https://img.shields.io/badge/OpenAI-Function_Calling-412991?style=for-the-badge&logo=openai&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white)
+
+[![CI](https://github.com/Batuhan-METU/rentafleet-pro/actions/workflows/ci.yml/badge.svg)](https://github.com/Batuhan-METU/rentafleet-pro/actions/workflows/ci.yml)
+
+<br/>
+
+<img src="docs/screenshots/dashboard.png" alt="RentA-Fleet PRO dashboard" width="900"/>
+
+</div>
+
+---
+
+## 📌 What is RentA-Fleet PRO?
+
+Running a rent-a-car company means juggling dozens of moving parts: which car is where, which driver is risky, what a vehicle *really* costs per day, and what price still makes a profit. Most small and mid-size fleets manage this with spreadsheets.
+
+**RentA-Fleet PRO** replaces those spreadsheets with a single **multi-tenant SaaS platform**. Each rental company gets its own branded workspace, and every decision, from renting a car to pricing it, is backed by live data.
+
+> 🇹🇷 Built for the Turkish rent-a-car market. The UI and domain language are Turkish, while the codebase and docs are developer-friendly.
+
+---
+
+## ✨ Feature Highlights
+
+<table>
+<tr>
+<td width="50%" valign="top">
+
+### 🚙 Fleet Management
+- Full vehicle inventory with status tracking (available, rented, in maintenance)
+- SIPP / ACRISS vehicle classification
+- Vehicle documents, mileage tracking and one-click **Excel export**
+- **Predictive maintenance** center that flags vehicles before they break
+
+</td>
+<td width="50%" valign="top">
+
+### 🛡️ Driver Risk Scoring
+- Automated **risk score (0–100)** on driver onboarding
+- Pure, testable **rule engine** with configurable thresholds
+- Eligibility checks and deposit rules derived from risk level
+- Full audit trail of every risk decision
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+### 📋 Rental Lifecycle
+- Create, extend, cancel and return rentals
+- **Early return** and **extension** workflows with automatic recalculation
+- Step-by-step rental workflow progress UI
+- Idempotent API endpoints, so double clicks never double-book
+
+</td>
+<td width="50%" valign="top">
+
+### 💰 Cost & Pricing Intelligence
+- True **daily cost per vehicle**: loan interest, insurance, overhead, opex and cash opportunity cost
+- **Floor price** engine that tells you the lowest profitable price
+- **Market price comparison** that matches your cars with comparable listings
+- Loan (kredi) tracking and allocation per vehicle
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+### 📍 Live GPS Tracking
+- Real-time vehicle map built with **Leaflet**
+- Telemetry stored in **ClickHouse** for fast time-series queries
+- Fleet-wide analytics and occupancy insights
+
+</td>
+<td width="50%" valign="top">
+
+### 🤖 AI Fleet Operations Agent
+- A real **function-calling agent**, not just a chatbot
+- Queries live fleet, driver, rental and financial data
+- Proposes real actions (create rental, return vehicle, onboard driver…)
+- Every write needs **human confirmation** before it runs
+
+</td>
+</tr>
+</table>
+
+---
+
+## 📸 Screenshots
+
+<div align="center">
+
+| 🚙 Vehicle Inventory | 🤖 AI Fleet Consultant |
+|:---:|:---:|
+| <img src="docs/screenshots/vehicles.png" alt="Vehicle list" width="440"/> | <img src="docs/screenshots/ai-assistant.png" alt="AI assistant" width="440"/> |
+
+</div>
+
+---
+
+## 🤖 Inside the AI Operations Agent
+
+The chat assistant is a tool-using agent that works on the same data and rules as the rest of the app.
+
+```mermaid
+sequenceDiagram
+    actor U as Fleet Manager
+    participant C as Chat UI (Vue)
+    participant A as AI Agent (OpenAI)
+    participant T as Tool Catalog
+    participant DB as Database
+
+    U->>C: "Extend rental 34 ARC 07 by 3 days"
+    C->>A: POST /api/ai/consult/ (SSE stream)
+    A->>T: read tools (lookup rental, pricing)
+    T->>DB: query live data
+    DB-->>A: results
+    A-->>C: proposes action → AIPendingAction
+    C-->>U: Confirm / Cancel card
+    U->>C: ✅ Onayla
+    C->>DB: POST /api/ai/actions/<uuid>/confirm/
 ```
-backend/apps/*            Django apps — views, serializers, models, urls
-backend/application/*     Use-case orchestration (touches the ORM, calls domain + infrastructure)
-backend/domain/*          Pure business rules (risk scoring, pricing, eligibility) — no ORM/infra imports
-backend/infrastructure/*  External services (ClickHouse, Enuygun/SIPP matching, cost calculation, reporting)
-backend/common/*          Cross-cutting middleware, permissions, multi-tenancy helpers
+
+- 🔒 **Safe by design.** Mutations are stored as a pending action with a 5-minute TTL. They are single-use and scoped to the user's company.
+- 🧩 **One source of truth.** Every tool's JSON schema is generated from the same DRF serializer the HTTP endpoint uses, so the agent can never drift from the real API.
+- 🛟 **Graceful fallback.** Without an `OPENAI_API_KEY`, the assistant falls back to deterministic, data-grounded answers instead of failing.
+- 🧾 **Auditable.** AI-driven changes are tagged in the audit log, so they are always distinguishable from manual actions.
+
+---
+
+## 🏗️ Architecture
+
+The backend follows a layered **clean architecture**. Business rules live in a pure domain layer with zero framework imports, which keeps them fast to test and easy to reason about.
+
+```mermaid
+flowchart LR
+    subgraph Client
+        V[Vue 3 SPA<br/>Pinia · Tailwind · Leaflet]
+    end
+    subgraph Backend[Django REST API]
+        direction TB
+        API[apps/*<br/>views · serializers · models]
+        APP[application/*<br/>use-case orchestration]
+        DOM[domain/*<br/>pure business rules]
+        INF[infrastructure/*<br/>external services]
+        API --> APP --> DOM
+        APP --> INF
+    end
+    V -- REST / SSE --> API
+    INF --> PG[(PostgreSQL)]
+    INF --> CH[(ClickHouse<br/>telemetry)]
+    INF --> RD[(Redis · Celery)]
+    INF --> OAI[[OpenAI]]
 ```
 
-Multi-tenancy is subdomain-based (`<company-slug>.rentafleetpro.com`),
-resolved by `CompanyRouterMiddleware`. Row-level data scoping always keys off
-`request.user.company`, not the subdomain-resolved `request.company` — see
-`backend/common/multitenancy_tools/scope.py`.
+| Layer | Responsibility |
+|---|---|
+| `backend/apps/` | Django apps: HTTP views, serializers, models, URLs |
+| `backend/application/` | Use-case orchestration across ORM, domain and infrastructure |
+| `backend/domain/` | Pure business rules: risk scoring, eligibility, deposits, rule engine |
+| `backend/infrastructure/` | Cost calculation, market pricing, ClickHouse, reporting, AI tools |
+| `backend/common/` | Middleware, permissions, multi-tenancy, audit helpers |
+| `frontend/src/` | Vue 3 Composition API (`<script setup>`) + Pinia SPA |
 
-Vue 3 (Composition API, `<script setup>`) + Pinia frontend, single-page app
-with a lightweight hand-rolled hash router (`stores/uiStore.js`), not
-vue-router.
+**Multi-tenancy.** Companies are resolved by subdomain (`<company>.rentafleetpro.com`) or a `?company=<slug>` parameter. Row-level data scoping always keys off the authenticated user's company.
 
-### AI Fleet Operations Assistant
+---
 
-The chat widget (`AIChatbot.vue` → `POST /api/ai/consult/`, SSE) is a real
-function-calling agent (OpenAI, `backend/infrastructure/services/ai/`), not
-just a Q&A bot — it can query live fleet/driver/rental/financial data and
-propose real actions (create/cancel/extend a rental, return a vehicle,
-onboard a driver, record a loan/expense/insurance policy/income).
+## 🚀 Getting Started
 
-- **Tool catalog**: `infrastructure/services/ai/tools/{read_tools,write_tools}.py`.
-  Every tool's parameter schema is generated directly from the same DRF
-  serializer the equivalent HTTP endpoint already uses
-  (`tools/schema.py:serializer_to_json_schema`) — there is exactly one source
-  of truth for validation, so the tool schema can never drift from the real API.
-- **Mutations require confirmation**: the agent never executes a
-  create/cancel/extend/return/etc. tool directly. It proposes one via a
-  `AIPendingAction` row (5-minute TTL, single-use `consumed_at`, company+user
-  scoped) and the chat UI renders a confirm/cancel card; the action only runs
-  when the user clicks "Onayla" (`POST /api/ai/actions/<uuid>/confirm/`).
-  Read-only tools (vehicle/driver/rental/pricing lookups) run immediately.
-- **Falls back gracefully**: with no `OPENAI_API_KEY`, or if the OpenAI call
-  fails, the assistant degrades to the original deterministic, data-grounded
-  Turkish fallback responses — no tool-calling, but never a hard error.
-- AI-driven mutations are tagged in the audit trail (`common/audit.py`,
-  Django admin `LogEntry`) as "AI asistanı aracılığıyla" so they're
-  distinguishable from manual UI actions.
+### Prerequisites
 
-## Getting started
+- Python **3.13**
+- Node.js **22.18+**
+- PostgreSQL *(optional in dev, SQLite is used when `DJANGO_DEBUG=true`)*
+- ClickHouse and Redis *(optional, the app degrades gracefully without them)*
 
-### Backend
+### 1️⃣ Backend
 
 ```sh
 cd backend
 python -m venv .venv && source .venv/bin/activate
-pip install -r requirements-dev.txt   # or requirements.txt for runtime-only
-cp .env.example .env                  # fill in real values
+pip install -r requirements-dev.txt
+cp .env.example .env
 python manage.py migrate
+python manage.py fleet_ops seed      # creates two branded demo companies
 python manage.py runserver
 ```
 
-Requires PostgreSQL (relational data) and ClickHouse (vehicle telemetry) —
-see `.env.example` for connection settings. `DJANGO_DEBUG=true` in `.env`
-uses SQLite automatically and skips several production-only hardening checks
-(cookie security, HSTS, the DB-engine parity guard in `settings.py`).
-
-Demo data:
-
-```sh
-python manage.py seed_data                        # randomized bulk data + telemetry
-python manage.py fleet_ops seed                    # two fixed, branded demo tenants (login creds included)
-```
-
-### Frontend
+### 2️⃣ Frontend
 
 ```sh
 cd frontend
@@ -89,85 +217,88 @@ npm install
 npm run dev
 ```
 
-Proxies `/api` to `http://127.0.0.1:8000` in dev (see `vite.config.js`).
+The dev server proxies `/api` to `http://127.0.0.1:8000`. Open the URL Vite prints and log in.
 
-### Cache + background jobs (optional)
+### 🔑 Demo accounts
 
-Set `REDIS_URL` (e.g. `redis://127.0.0.1:6379/0`) to enable a shared cache
-(`django.core.cache.backends.redis.RedisCache`) and asynchronous Celery
-tasks. Without it, the cache falls back to per-process `LocMemCache` and
-Celery tasks run synchronously in-request (`CELERY_TASK_ALWAYS_EAGER`) — the
-app works either way, this is purely a scale/production concern.
+| Company | Username | Password |
+|---|---|---|
+| Ahmet Rent A Car | `ahmet_mudur` | `ahmet123` |
+| Ercan Rent A Car | `ercan_mudur` | `ercan123` |
+
+<details>
+<summary><b>⚙️ Optional: Redis cache and Celery background jobs</b></summary>
+
+<br/>
+
+Set `REDIS_URL` (for example `redis://127.0.0.1:6379/0`) to enable a shared cache and asynchronous Celery tasks. Without it, the cache falls back to in-process memory and tasks run synchronously.
 
 ```sh
 redis-server --daemonize yes
-celery -A backend.celery_app worker --loglevel=info    # process tasks
-celery -A backend.celery_app beat --loglevel=info       # run scheduled tasks (see settings.CELERY_BEAT_SCHEDULE)
+celery -A backend.celery_app worker --loglevel=info
+celery -A backend.celery_app beat --loglevel=info
 ```
 
-## Deploy (Render, free tier)
+For bulk randomized data with telemetry, run `python manage.py seed_data`.
 
-Single Render **Web Service** runs everything: Django serves both the API
-(`/api/*`) and the built Vue SPA (WhiteNoise serves `frontend/dist/` at `/`
-— safe because the frontend uses hash routing, `#/overview`, so the browser
-never requests any path but `/` from the server). One URL, no CORS to
-configure, one dashboard. Backed by a free Render PostgreSQL database.
+</details>
 
-### First-time setup
+---
 
-1. Push this repo to GitHub (Render deploys from a GitHub repo).
-2. On [render.com](https://render.com): **New +** → **Blueprint** → connect
-   the repo → Render reads `render.yaml` at the repo root and provisions the
-   web service + free Postgres database automatically.
-3. Before the first deploy finishes, open the new service → **Environment**
-   and set `OPENAI_API_KEY` (marked `sync: false` in `render.yaml`, so it's
-   never committed — paste your real key there). Everything else
-   (`DJANGO_SECRET_KEY`, `DATABASE_URL`, hosts, CORS) is already wired up in
-   `render.yaml`.
-4. Wait for the build to finish (`npm run build` + `pip install` +
-   `collectstatic`, then `migrate` + `gunicorn` on start) and open the
-   `*.onrender.com` URL Render gives you.
-5. Seed demo data once: open the web service's **Shell** tab in the Render
-   dashboard and run
+## ☁️ Deployment
+
+One **Render** web service runs everything. Django serves the API at `/api/*` and the built Vue SPA at `/` through WhiteNoise, so there is one URL and no CORS setup.
+
+<details>
+<summary><b>📦 Deploy to Render (free tier)</b></summary>
+
+<br/>
+
+1. On [render.com](https://render.com) choose **New + → Blueprint** and connect this repo. Render reads [`render.yaml`](render.yaml) and provisions the web service plus a free PostgreSQL database.
+2. In the service's **Environment** tab, set `OPENAI_API_KEY`. Everything else is already wired up.
+3. Wait for the build, then open the `*.onrender.com` URL.
+4. Seed demo data once from the service's **Shell** tab:
    ```sh
    python backend/manage.py fleet_ops seed --i-know-this-is-not-prod
    ```
-   (the flag is required because `DJANGO_DEBUG=false` in production and this
-   command creates fixed demo passwords — see the command's own guard). This
-   creates the two white-label demo tenants: `ahmet_mudur` / `ahmet123` and
-   `ercan_mudur` / `ercan123`. Log in at `https://<your-app>.onrender.com/`
-   with either.
 
-### Known free-tier limits (fine for a demo, plan around them later)
+**Free-tier notes**
 
-- **Cold start**: the free web service sleeps after 15 min idle; the next
-  request takes ~30-60s to wake it up. **Open the URL a few minutes before
-  presenting** so it's already warm.
-- **Free Postgres expires after 30 days.** Fine for tomorrow and continued
-  work this month; before it expires, either upgrade the Render database or
-  point `DATABASE_URL` at a separate always-free provider (e.g. Neon.tech)
-  — no code change needed, it's one connection string.
-- Multi-tenancy here uses the `?company=<slug>` query param (already
-  supported, see `common/multitenancy_tools/scope.py`), not wildcard
-  subdomains — a `*.onrender.com` wildcard isn't available on the free tier.
-- `ClickHouse`/`Redis` are optional (see above) — leave them unset; the app
-  degrades gracefully (health check reports them `"unavailable"`, everything
-  else works normally). Vehicle live-telemetry/GPS panels will show empty
-  data without a ClickHouse instance configured.
-- Uploaded vehicle documents (`MEDIA_ROOT`) live on local container disk,
-  which Render's free tier does **not** persist across deploys/restarts —
-  fine for a demo, revisit with object storage (S3-compatible) later.
+- The service sleeps after 15 minutes idle, so the first request can take 30–60 seconds.
+- Free PostgreSQL expires after 30 days. Point `DATABASE_URL` at any Postgres provider to move it.
+- Wildcard subdomains are not available, so tenants are selected with `?company=<slug>`.
+- Uploaded files are not persisted across deploys on the free tier.
 
-### Docker fallback
+</details>
 
-`render.yaml` uses Render's native Python build environment (`npm` +
-`pip` in one `buildCommand`). If that build ever fails because the build
-image lacks Node, switch the service's **Environment** to **Docker** in the
-Render dashboard — a working multi-stage `Dockerfile` (Node build stage →
-Python/gunicorn stage) is already at the repo root; Render will pick it up
-automatically instead of `render.yaml`'s native build.
+<details>
+<summary><b>🐳 Docker</b></summary>
 
-## Testing, linting, type-checking
+<br/>
+
+A multi-stage [`Dockerfile`](Dockerfile) builds the frontend with Node and serves everything with gunicorn.
+
+```sh
+docker build -t rentafleet-pro .
+docker run -p 8000:8000 -e DJANGO_DEBUG=true rentafleet-pro
+```
+
+</details>
+
+---
+
+## 🧪 Quality & Testing
+
+Every push and pull request runs the full pipeline in **GitHub Actions**. Lint and type errors are hard gates.
+
+| Area | Tooling |
+|---|---|
+| Backend tests | `pytest` + `pytest-django` |
+| Backend lint | `ruff` (zero findings) |
+| Backend types | `mypy` + `django-stubs` (zero findings) |
+| Frontend tests | `vitest` + Vue Test Utils |
+| Frontend lint | `eslint` + `prettier` |
+| Build | Production Vite build |
 
 ```sh
 # Backend
@@ -176,27 +307,49 @@ ruff check backend
 mypy backend --config-file pyproject.toml
 
 # Frontend
-cd frontend
-npm run test    # vitest
-npm run lint    # eslint
-npm run format  # prettier --write
-npm run build
+cd frontend && npm run test && npm run lint && npm run build
 ```
 
-CI (`.github/workflows/ci.yml`) runs ruff, mypy, and pytest for the backend,
-and eslint, vitest, and the production build for the frontend, on every push
-and pull request. Both `ruff check backend` and `mypy backend --config-file
-pyproject.toml` are fully clean (zero findings) and are hard gates — a PR
-that introduces a new lint or type error fails CI. The only exceptions are a
-handful of explicit, justified `pyproject.toml` `per-file-ignores` (a few
-`zip()` calls in Excel-import commands where adding `strict=True` can't be
-safely verified without real production spreadsheets) and narrow, commented
-`# type: ignore[...]` lines where django-stubs cannot express a runtime
-invariant (documented inline at each site).
+---
 
-## Further reading
+## 📂 Project Structure
 
-- [MALIYET_HESAPLAMA_METODOLOJISI.md](MALIYET_HESAPLAMA_METODOLOJISI.md) — the
-  authoritative vehicle cost/profitability calculation methodology.
-- [GUNLUK_MALIYET_HESAPLAMA_DETAYLI.md](GUNLUK_MALIYET_HESAPLAMA_DETAYLI.md) —
-  daily cost breakdown detail.
+```
+rentafleet-pro/
+├── backend/
+│   ├── apps/              # Django apps (vehicles, rentals, risk_checks, ai, …)
+│   ├── application/       # Use cases (customer, driver, rental, risk)
+│   ├── domain/            # Pure rules (risk, eligibility, deposit, rule_engine)
+│   ├── infrastructure/    # Cost calculation, market pricing, AI tools, reporting
+│   ├── common/            # Middleware, permissions, multi-tenancy, audit
+│   └── tests/
+├── frontend/
+│   └── src/               # Vue 3 views, components, Pinia stores, composables
+├── docs/screenshots/
+├── Dockerfile
+└── render.yaml
+```
+
+---
+
+## 📚 Further Reading
+
+- 📘 [Vehicle cost & profitability methodology](MALIYET_HESAPLAMA_METODOLOJISI.md)
+- 📗 [Detailed daily cost calculation](GUNLUK_MALIYET_HESAPLAMA_DETAYLI.md)
+
+---
+
+<div align="center">
+
+### 👨‍💻 Author
+
+**Batuhan Başoda**
+Computer Engineering @ METU
+
+[![GitHub](https://img.shields.io/badge/GitHub-Batuhan--METU-181717?style=for-the-badge&logo=github)](https://github.com/Batuhan-METU)
+
+<br/>
+
+⭐ **If you find this project interesting, consider giving it a star!** ⭐
+
+</div>
